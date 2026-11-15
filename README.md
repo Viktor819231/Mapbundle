@@ -23,7 +23,7 @@ Get **KEK-Maps-1.1.zip** from the [Releases](../../releases) page (or *Code → 
 |---|---|
 | Mirror Map: Skirmish | The game's Skirmish (all land), exact left-right mirror, a dead strip in the middle (or none). Every capital gets Horses, Iron, Coal and Aluminium within 3 tiles. |
 | Mirror Map: Pangaea | The game's Pangaea, mirrored. Resources spread evenly, a richer middle band worth fighting for, no long mountain ranges. |
-| Mirror Map: Archipelago | Mirrored start islands with islands of every size around them. Many options (island size, hills, resources, Fish, deep ocean). |
+| Mirror Map: KEK Archipelago | Our KEK Archipelago, mirrored: start islands with islands of every size around them. Many options (island size, hills, resources, Fish, deep ocean). |
 | Mirror Map: East vs West | Mirrored, one team in the east, one in the west. |
 | Mirror Map: Ring | Mirrored ring-shaped land. |
 
