@@ -4,7 +4,7 @@ Fair map scripts for Civilization V: Brave New World multiplayer (made for KEK M
 
 ## Download
 
-*Code → Download ZIP* (the newest files). The [Releases](../../releases) page has older versions as zip files.
+Get **KEK-Maps-1.2.zip** from the [Releases](../../releases) page (older versions are there too), or *Code → Download ZIP*.
 
 ## Install
 
