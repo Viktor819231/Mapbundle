@@ -36,7 +36,7 @@ OVAL_OPTIONS = {
 			{"Normal (about 90 tiles)", "The usual room for a multiplayer game."},
 			{"More (about 105 tiles)", "More room to expand before borders meet."},
 			{"Lots (about 125 tiles)", "A big continent."},
-		}, DefaultValue = 3},
+		}, DefaultValue = 2},
 	{key = "symmetry", Name = "Other side",
 		Values = {
 			{"Rotated", "The other team's half is your half turned round (180 degrees): your north-west is their south-east. No mirror line in the middle."},
