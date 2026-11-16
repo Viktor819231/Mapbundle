@@ -1,3 +1,204 @@
+-- >>> CITY STATE QUALITY (shared by every KEK map; source: mirror-map/CityStateQuality.lua,
+-- pasted into each script by tools/sync_csq.py - edit there, then run it) <<<
+-- User 11-16: a city state has at most 1 luxury within 3 tiles (Mercantile ones
+-- 2), and a "City states" map option: Poor / Normal / Rich. Runs last, on the
+-- finished map. No dice: on mirror maps twins get exactly the same treatment
+-- (choices are ordered by distance, then by the smaller of a plot and its twin).
+CSQ_VALUES = {
+	{"Poor", "City states get little: at most 1 food resource within 2 tiles, no Stone added. Always at most 1 luxury (Mercantile 2)."},
+	{"Normal", "The map's own city states. Always at most 1 luxury within 3 tiles (Mercantile 2)."},
+	{"Rich", "City states worth taking: at least 4 food resources within 2 tiles and a Stone within 3. Always at most 1 luxury (Mercantile 2)."},
+};
+function CSQ_OptionDef()
+	return {Name = "City states", Values = CSQ_VALUES, DefaultValue = 2, SortPriority = 99};
+end
+
+function CSQ_Level()
+	-- the option is always the LAST one in the map's list
+	local ok, n = pcall(function() return #GetMapScriptInfo().CustomOptions end);
+	if not ok or n == nil or n < 1 then return 2 end
+	local v = Map.GetCustomOption(n);
+	if v == nil or v < 1 or v > 3 then return 2 end
+	return v;
+end
+
+function CSQ_Trait(id)
+	local ok, t = pcall(function() return Players[id]:GetMinorCivTrait() end);
+	if ok and t ~= nil and t >= 0 then return t end
+	local ok2, t2 = pcall(function()
+		local row = GameInfo.MinorCivilizations[PreGame.GetMinorCivType(id)];
+		if row == nil then return -1 end
+		local tr = GameInfo.MinorCivTraits[row.MinorCivTrait];
+		return tr and tr.ID or -1;
+	end);
+	if ok2 and t2 ~= nil then return t2 end
+	return -1;
+end
+
+function CSQ_Run(level, twinOf)
+	-- level 1 poor / 2 normal / 3 rich; twinOf(plotIndex) -> mirror twin index or nil
+	local iW, iH = Map.GetGridSize();
+	local function Idx(p) return p:GetY() * iW + p:GetX() end
+	local function Key(i)
+		if twinOf ~= nil then
+			local t = twinOf(i);
+			if t ~= nil and t >= 0 and t < i then return t end
+		end
+		return i;
+	end
+	local mercantile = GameInfo.MinorCivTraits and GameInfo.MinorCivTraits["MINOR_TRAIT_MERCANTILE"];
+	local mercID = mercantile and mercantile.ID or -99;
+	local majors = {};
+	for id = 0, GameDefines.MAX_MAJOR_CIVS - 1 do
+		local p = Players[id];
+		local ok, sp = pcall(function() return p ~= nil and p:IsEverAlive() and p:GetStartingPlot() end);
+		if ok and sp then table.insert(majors, sp) end
+	end
+	local function NearMajor(p)
+		for _, m in ipairs(majors) do
+			if Map.PlotDistance(m:GetX(), m:GetY(), p:GetX(), p:GetY()) <= 3 then return true end
+		end
+		return false;
+	end
+	local function Ring(x, y, r1, r2)
+		local out = {};
+		for dy = -r2, r2 do
+			for dx = -r2 - 1, r2 + 1 do
+				local p = Map.GetPlot(x + dx, y + dy);
+				if p ~= nil then
+					local d = Map.PlotDistance(x, y, p:GetX(), p:GetY());
+					if d >= r1 and d <= r2 then table.insert(out, {p, d}) end
+				end
+			end
+		end
+		table.sort(out, function(a, b)
+			if a[2] ~= b[2] then return a[2] < b[2] end
+			return Key(Idx(a[1])) < Key(Idx(b[1]));
+		end);
+		return out;
+	end
+	local function Usage(r)
+		if r == -1 or GameInfo.Resources[r] == nil then return nil end
+		return GameInfo.Resources[r].ResourceUsage;
+	end
+	local function IsFood(r)
+		local row = r ~= -1 and GameInfo.Resources[r] or nil;
+		return row ~= nil and row.ResourceUsage == 0 and row.Type ~= "RESOURCE_STONE" and row.Type ~= "RESOURCE_MARBLE";
+	end
+	local function Res(t) local row = GameInfo.Resources[t]; return row and row.ID or nil end
+	local function FoodFor(p)
+		-- a food resource that suits the plot (no dice), or nil
+		if p:IsMountain() or p:GetImprovementType() ~= -1 or p:GetResourceType(-1) ~= -1 then return nil end
+		local T, F = TerrainTypes, FeatureTypes;
+		local t, f = p:GetTerrainType(), p:GetFeatureType();
+		if p:IsWater() then
+			if not p:IsLake() and t == T.TERRAIN_COAST and f == F.NO_FEATURE then return Res("RESOURCE_FISH") end
+			return nil;
+		end
+		if f == F.FEATURE_FOREST and (t == T.TERRAIN_TUNDRA or t == T.TERRAIN_PLAINS or t == T.TERRAIN_GRASS) then return Res("RESOURCE_DEER") end
+		if f == F.FEATURE_JUNGLE then return Res("RESOURCE_BANANA") end
+		if f ~= F.NO_FEATURE then return nil end
+		if p:IsHills() then
+			if t == T.TERRAIN_GRASS or t == T.TERRAIN_PLAINS or t == T.TERRAIN_DESERT or t == T.TERRAIN_TUNDRA then return Res("RESOURCE_SHEEP") end
+			return nil;
+		end
+		if t == T.TERRAIN_PLAINS then return Res("RESOURCE_WHEAT") end
+		if t == T.TERRAIN_GRASS then return Res("RESOURCE_COW") end
+		if t == T.TERRAIN_TUNDRA then return Res("RESOURCE_DEER") end
+		return nil;
+	end
+	local function Set(p, r, amt)
+		-- on mirror maps the twin plot gets the same
+		p:SetResourceType(r, amt or 0);
+		if twinOf ~= nil then
+			local t = twinOf(Idx(p));
+			if t ~= nil and t >= 0 and t ~= Idx(p) then Map.GetPlotByIndex(t):SetResourceType(r, amt or 0) end
+		end
+	end
+	local log = {cs = 0, luxOff = 0, foodOff = 0, foodOn = 0, stone = 0};
+	-- the city states to treat: on mirror maps only one of each twin pair (the
+	-- one with the smaller plot index); its changes are copied to the twin
+	local list = {};
+	for id = GameDefines.MAX_MAJOR_CIVS, GameDefines.MAX_CIV_PLAYERS - 1 do
+		local pl = Players[id];
+		local ok, sp = pcall(function() return pl ~= nil and pl:IsEverAlive() and pl:GetStartingPlot() end);
+		if ok and sp then
+			local i = Idx(sp);
+			local t = twinOf and twinOf(i) or nil;
+			if t == nil or t < 0 or t >= i then table.insert(list, {id, sp}) end
+		end
+	end
+	-- pass 1: every city state's own nearest luxury (Mercantile: 2) is protected
+	local protected = {};
+	for _, c in ipairs(list) do
+		local maxLux = (CSQ_Trait(c[1]) == mercID) and 2 or 1;
+		local n = 0;
+		for _, e in ipairs(Ring(c[2]:GetX(), c[2]:GetY(), 1, 3)) do
+			if n < maxLux and Usage(e[1]:GetResourceType(-1)) == 2 then protected[Idx(e[1])] = true; n = n + 1 end
+		end
+	end
+	for _, c in ipairs(list) do
+		local id, sp = c[1], c[2];
+		do
+			log.cs = log.cs + 1;
+			local x, y = sp:GetX(), sp:GetY();
+			local around = Ring(x, y, 1, 3);
+			-- luxuries: keep the nearest 1 (Mercantile 2), and any other city state's own one
+			local maxLux = (CSQ_Trait(id) == mercID) and 2 or 1;
+			local kept = 0;
+			for _, e in ipairs(around) do
+				local p = e[1];
+				if Usage(p:GetResourceType(-1)) == 2 then
+					if kept < maxLux or NearMajor(p) or protected[Idx(p)] then
+						kept = kept + 1;
+					else
+						Set(p, -1); log.luxOff = log.luxOff + 1;
+					end
+				end
+			end
+			if level == 1 then
+				local food = 0;
+				for _, e in ipairs(around) do
+					local p = e[1];
+					if e[2] <= 2 and IsFood(p:GetResourceType(-1)) then
+						food = food + 1;
+						if food > 1 and not NearMajor(p) then Set(p, -1); log.foodOff = log.foodOff + 1 end
+					end
+				end
+			elseif level == 3 then
+				local food = 0;
+				for _, e in ipairs(around) do
+					if e[2] <= 2 and IsFood(e[1]:GetResourceType(-1)) then food = food + 1 end
+				end
+				for _, e in ipairs(around) do
+					if food >= 4 then break end
+					if e[2] <= 2 and not NearMajor(e[1]) then
+						local r = FoodFor(e[1]);
+						if r ~= nil then Set(e[1], r, 1); food = food + 1; log.foodOn = log.foodOn + 1 end
+					end
+				end
+				local stone = Res("RESOURCE_STONE");
+				local has = false;
+				for _, e in ipairs(around) do if e[1]:GetResourceType(-1) == stone then has = true end end
+				if not has and stone ~= nil then
+					for _, e in ipairs(around) do
+						local p = e[1];
+						if e[2] >= 2 and not p:IsWater() and not p:IsMountain() and p:GetResourceType(-1) == -1
+							and p:GetImprovementType() == -1 and p:GetFeatureType() == FeatureTypes.NO_FEATURE
+							and (p:GetTerrainType() == TerrainTypes.TERRAIN_PLAINS or p:GetTerrainType() == TerrainTypes.TERRAIN_GRASS
+								or p:GetTerrainType() == TerrainTypes.TERRAIN_DESERT or p:GetTerrainType() == TerrainTypes.TERRAIN_TUNDRA)
+							and not NearMajor(p) then
+							Set(p, stone, 1); log.stone = log.stone + 1; break;
+						end
+					end
+				end
+			end
+		end
+	end
+	print("City states (level " .. level .. "):", log.cs, "city states, luxuries removed", log.luxOff,
+		"food removed", log.foodOff, "food added", log.foodOn, "stone added", log.stone);
+end
+-- <<< CITY STATE QUALITY END >>>
 ------------------------------------------------------------------------------
 --	FILE:	 BitMoreFairPangea.lua
 --	AUTHOR:  KEK multiplayer community (2026), built on Firaxis' Pangaea.lua
@@ -80,12 +281,12 @@ function GetMapScriptInfo()
 		SortPriority = 1,
 	};
 	return {
-		Name = "KEK BitMoreFairPangea 1.2",
+		Name = "KEK BitMoreFairPangea 1.3",
 		Description = "The game's Pangaea with fewer hopeless starts: more land (option), open sea lanes near the poles, no mountain walls around capitals, richer tundra and grassland, tundra capitals on a hill or river, weak capitals get hills and food bonuses, Strategic Balance adds Coal and Aluminium near every capital.",
 		IsAdvancedMap = false,
 		IconIndex = 0,
 		SortIndex = 2,
-		CustomOptions = {world_age, temperature, rainfall, sea_level, resources, land},
+		CustomOptions = {world_age, temperature, rainfall, sea_level, resources, land, CSQ_OptionDef()},
 	}
 end
 ------------------------------------------------------------------------------
@@ -849,6 +1050,7 @@ function StartPlotSystem()
 
 	print("Placing Resources and City States.");
 	start_plot_database:PlaceResourcesAndCityStates()
+	CSQ_Run(CSQ_Level(), nil);	-- city states: max 1 luxury + quality option
 end
 ------------------------------------------------------------------------------
 function FairWrapX()

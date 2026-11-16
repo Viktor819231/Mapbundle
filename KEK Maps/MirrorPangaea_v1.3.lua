@@ -1,3 +1,204 @@
+-- >>> CITY STATE QUALITY (shared by every KEK map; source: mirror-map/CityStateQuality.lua,
+-- pasted into each script by tools/sync_csq.py - edit there, then run it) <<<
+-- User 11-16: a city state has at most 1 luxury within 3 tiles (Mercantile ones
+-- 2), and a "City states" map option: Poor / Normal / Rich. Runs last, on the
+-- finished map. No dice: on mirror maps twins get exactly the same treatment
+-- (choices are ordered by distance, then by the smaller of a plot and its twin).
+CSQ_VALUES = {
+	{"Poor", "City states get little: at most 1 food resource within 2 tiles, no Stone added. Always at most 1 luxury (Mercantile 2)."},
+	{"Normal", "The map's own city states. Always at most 1 luxury within 3 tiles (Mercantile 2)."},
+	{"Rich", "City states worth taking: at least 4 food resources within 2 tiles and a Stone within 3. Always at most 1 luxury (Mercantile 2)."},
+};
+function CSQ_OptionDef()
+	return {Name = "City states", Values = CSQ_VALUES, DefaultValue = 2, SortPriority = 99};
+end
+
+function CSQ_Level()
+	-- the option is always the LAST one in the map's list
+	local ok, n = pcall(function() return #GetMapScriptInfo().CustomOptions end);
+	if not ok or n == nil or n < 1 then return 2 end
+	local v = Map.GetCustomOption(n);
+	if v == nil or v < 1 or v > 3 then return 2 end
+	return v;
+end
+
+function CSQ_Trait(id)
+	local ok, t = pcall(function() return Players[id]:GetMinorCivTrait() end);
+	if ok and t ~= nil and t >= 0 then return t end
+	local ok2, t2 = pcall(function()
+		local row = GameInfo.MinorCivilizations[PreGame.GetMinorCivType(id)];
+		if row == nil then return -1 end
+		local tr = GameInfo.MinorCivTraits[row.MinorCivTrait];
+		return tr and tr.ID or -1;
+	end);
+	if ok2 and t2 ~= nil then return t2 end
+	return -1;
+end
+
+function CSQ_Run(level, twinOf)
+	-- level 1 poor / 2 normal / 3 rich; twinOf(plotIndex) -> mirror twin index or nil
+	local iW, iH = Map.GetGridSize();
+	local function Idx(p) return p:GetY() * iW + p:GetX() end
+	local function Key(i)
+		if twinOf ~= nil then
+			local t = twinOf(i);
+			if t ~= nil and t >= 0 and t < i then return t end
+		end
+		return i;
+	end
+	local mercantile = GameInfo.MinorCivTraits and GameInfo.MinorCivTraits["MINOR_TRAIT_MERCANTILE"];
+	local mercID = mercantile and mercantile.ID or -99;
+	local majors = {};
+	for id = 0, GameDefines.MAX_MAJOR_CIVS - 1 do
+		local p = Players[id];
+		local ok, sp = pcall(function() return p ~= nil and p:IsEverAlive() and p:GetStartingPlot() end);
+		if ok and sp then table.insert(majors, sp) end
+	end
+	local function NearMajor(p)
+		for _, m in ipairs(majors) do
+			if Map.PlotDistance(m:GetX(), m:GetY(), p:GetX(), p:GetY()) <= 3 then return true end
+		end
+		return false;
+	end
+	local function Ring(x, y, r1, r2)
+		local out = {};
+		for dy = -r2, r2 do
+			for dx = -r2 - 1, r2 + 1 do
+				local p = Map.GetPlot(x + dx, y + dy);
+				if p ~= nil then
+					local d = Map.PlotDistance(x, y, p:GetX(), p:GetY());
+					if d >= r1 and d <= r2 then table.insert(out, {p, d}) end
+				end
+			end
+		end
+		table.sort(out, function(a, b)
+			if a[2] ~= b[2] then return a[2] < b[2] end
+			return Key(Idx(a[1])) < Key(Idx(b[1]));
+		end);
+		return out;
+	end
+	local function Usage(r)
+		if r == -1 or GameInfo.Resources[r] == nil then return nil end
+		return GameInfo.Resources[r].ResourceUsage;
+	end
+	local function IsFood(r)
+		local row = r ~= -1 and GameInfo.Resources[r] or nil;
+		return row ~= nil and row.ResourceUsage == 0 and row.Type ~= "RESOURCE_STONE" and row.Type ~= "RESOURCE_MARBLE";
+	end
+	local function Res(t) local row = GameInfo.Resources[t]; return row and row.ID or nil end
+	local function FoodFor(p)
+		-- a food resource that suits the plot (no dice), or nil
+		if p:IsMountain() or p:GetImprovementType() ~= -1 or p:GetResourceType(-1) ~= -1 then return nil end
+		local T, F = TerrainTypes, FeatureTypes;
+		local t, f = p:GetTerrainType(), p:GetFeatureType();
+		if p:IsWater() then
+			if not p:IsLake() and t == T.TERRAIN_COAST and f == F.NO_FEATURE then return Res("RESOURCE_FISH") end
+			return nil;
+		end
+		if f == F.FEATURE_FOREST and (t == T.TERRAIN_TUNDRA or t == T.TERRAIN_PLAINS or t == T.TERRAIN_GRASS) then return Res("RESOURCE_DEER") end
+		if f == F.FEATURE_JUNGLE then return Res("RESOURCE_BANANA") end
+		if f ~= F.NO_FEATURE then return nil end
+		if p:IsHills() then
+			if t == T.TERRAIN_GRASS or t == T.TERRAIN_PLAINS or t == T.TERRAIN_DESERT or t == T.TERRAIN_TUNDRA then return Res("RESOURCE_SHEEP") end
+			return nil;
+		end
+		if t == T.TERRAIN_PLAINS then return Res("RESOURCE_WHEAT") end
+		if t == T.TERRAIN_GRASS then return Res("RESOURCE_COW") end
+		if t == T.TERRAIN_TUNDRA then return Res("RESOURCE_DEER") end
+		return nil;
+	end
+	local function Set(p, r, amt)
+		-- on mirror maps the twin plot gets the same
+		p:SetResourceType(r, amt or 0);
+		if twinOf ~= nil then
+			local t = twinOf(Idx(p));
+			if t ~= nil and t >= 0 and t ~= Idx(p) then Map.GetPlotByIndex(t):SetResourceType(r, amt or 0) end
+		end
+	end
+	local log = {cs = 0, luxOff = 0, foodOff = 0, foodOn = 0, stone = 0};
+	-- the city states to treat: on mirror maps only one of each twin pair (the
+	-- one with the smaller plot index); its changes are copied to the twin
+	local list = {};
+	for id = GameDefines.MAX_MAJOR_CIVS, GameDefines.MAX_CIV_PLAYERS - 1 do
+		local pl = Players[id];
+		local ok, sp = pcall(function() return pl ~= nil and pl:IsEverAlive() and pl:GetStartingPlot() end);
+		if ok and sp then
+			local i = Idx(sp);
+			local t = twinOf and twinOf(i) or nil;
+			if t == nil or t < 0 or t >= i then table.insert(list, {id, sp}) end
+		end
+	end
+	-- pass 1: every city state's own nearest luxury (Mercantile: 2) is protected
+	local protected = {};
+	for _, c in ipairs(list) do
+		local maxLux = (CSQ_Trait(c[1]) == mercID) and 2 or 1;
+		local n = 0;
+		for _, e in ipairs(Ring(c[2]:GetX(), c[2]:GetY(), 1, 3)) do
+			if n < maxLux and Usage(e[1]:GetResourceType(-1)) == 2 then protected[Idx(e[1])] = true; n = n + 1 end
+		end
+	end
+	for _, c in ipairs(list) do
+		local id, sp = c[1], c[2];
+		do
+			log.cs = log.cs + 1;
+			local x, y = sp:GetX(), sp:GetY();
+			local around = Ring(x, y, 1, 3);
+			-- luxuries: keep the nearest 1 (Mercantile 2), and any other city state's own one
+			local maxLux = (CSQ_Trait(id) == mercID) and 2 or 1;
+			local kept = 0;
+			for _, e in ipairs(around) do
+				local p = e[1];
+				if Usage(p:GetResourceType(-1)) == 2 then
+					if kept < maxLux or NearMajor(p) or protected[Idx(p)] then
+						kept = kept + 1;
+					else
+						Set(p, -1); log.luxOff = log.luxOff + 1;
+					end
+				end
+			end
+			if level == 1 then
+				local food = 0;
+				for _, e in ipairs(around) do
+					local p = e[1];
+					if e[2] <= 2 and IsFood(p:GetResourceType(-1)) then
+						food = food + 1;
+						if food > 1 and not NearMajor(p) then Set(p, -1); log.foodOff = log.foodOff + 1 end
+					end
+				end
+			elseif level == 3 then
+				local food = 0;
+				for _, e in ipairs(around) do
+					if e[2] <= 2 and IsFood(e[1]:GetResourceType(-1)) then food = food + 1 end
+				end
+				for _, e in ipairs(around) do
+					if food >= 4 then break end
+					if e[2] <= 2 and not NearMajor(e[1]) then
+						local r = FoodFor(e[1]);
+						if r ~= nil then Set(e[1], r, 1); food = food + 1; log.foodOn = log.foodOn + 1 end
+					end
+				end
+				local stone = Res("RESOURCE_STONE");
+				local has = false;
+				for _, e in ipairs(around) do if e[1]:GetResourceType(-1) == stone then has = true end end
+				if not has and stone ~= nil then
+					for _, e in ipairs(around) do
+						local p = e[1];
+						if e[2] >= 2 and not p:IsWater() and not p:IsMountain() and p:GetResourceType(-1) == -1
+							and p:GetImprovementType() == -1 and p:GetFeatureType() == FeatureTypes.NO_FEATURE
+							and (p:GetTerrainType() == TerrainTypes.TERRAIN_PLAINS or p:GetTerrainType() == TerrainTypes.TERRAIN_GRASS
+								or p:GetTerrainType() == TerrainTypes.TERRAIN_DESERT or p:GetTerrainType() == TerrainTypes.TERRAIN_TUNDRA)
+							and not NearMajor(p) then
+							Set(p, stone, 1); log.stone = log.stone + 1; break;
+						end
+					end
+				end
+			end
+		end
+	end
+	print("City states (level " .. level .. "):", log.cs, "city states, luxuries removed", log.luxOff,
+		"food removed", log.foodOff, "food added", log.foodOn, "stone added", log.stone);
+end
+-- <<< CITY STATE QUALITY END >>>
 ------------------------------------------------------------------------------
 --	FILE:	 MirrorPangaea.lua
 --	MAP:	 Mirror Map: Pangaea (KEK multiplayer community, 2026; replaces the
@@ -85,6 +286,12 @@ OVAL_OPTIONS = {
 			{"Yes", "East and west edges meet. The back ends of the oval face each other across the ocean."},
 			{"No", "Flat map: the back ends of the oval face the map edges."},
 		}, DefaultValue = 1},
+	{key = "middle", Name = "Middle of the map",
+		Values = {
+			{"Rich", "The middle is worth fighting for: extra luxuries, strategics and food on the centre line, rivers start in the middle."},
+			{"Normal", "Bigger maps: as Rich. Duel and tiny: no centre-line extras, fewer rivers and resources in the middle, so nobody has to rush it."},
+			{"Barren", "Almost a divider: a bare strip 2-3 tiles wide down the middle (flat, no forest, a few lone mountains, no resources); few resources and no river starts near it."},
+		}, DefaultValue = 2},
 };
 oval_optIndex = {};
 for n, def in ipairs(OVAL_OPTIONS) do oval_optIndex[def.key] = n end
@@ -96,14 +303,25 @@ function OvalOpt(key)
 	if v == nil or v < 1 or v > #OVAL_OPTIONS[n].Values then v = OVAL_OPTIONS[n].DefaultValue end
 	return v;
 end
+-- 11-16 (user): how much the middle holds. 1 rich, 2 a bit less, 3 barren.
+-- Normal on big maps = rich; on duel / tiny it is the "less" level.
+function OvalMiddleLevel()
+	local m = OvalOpt("middle");
+	if m == 1 then return 1 end
+	if m == 3 then return 3 end
+	local ws = (Map ~= nil and Map.GetWorldSize ~= nil) and Map.GetWorldSize() or 3;
+	if ws <= 1 then return 2 end
+	return 1;
+end
 ------------------------------------------------------------------------------
 function GetMapScriptInfo()
 	local options = {};
 	for n, def in ipairs(OVAL_OPTIONS) do
 		table.insert(options, {Name = def.Name, Values = def.Values, DefaultValue = def.DefaultValue, SortPriority = n});
 	end
+	table.insert(options, CSQ_OptionDef());	-- always last (CSQ_Level reads the last option)
 	return {
-		Name = "Mirror Map: Pangaea 1.2",
+		Name = "Mirror Map: Pangaea 1.3",
 		Description = "One big continent cut in half by a mirror line, one team per half. No divider: the halves run into each other across a wide middle. Resources spread evenly over the whole land. Wraps east-west: small islands across the ocean link the coastal starts at the back ends. Every capital gets Horses, Iron, Coal and Aluminium within 3 tiles.",
 		IconAtlas = "WORLDTYPE_ATLAS_2",
 		IconIndex = 0,
@@ -164,6 +382,9 @@ function GetMapInitData(worldSize)
 	if okT and teams ~= nil and teams <= 1 then perPlayer = perPlayer * 1.3 end
 	-- the whole map's land: players x the option (city states live inside it)
 	local land = players * perPlayer;
+	-- 11-16 (user: duel too small, the city states must fit with room to spare):
+	-- 2 players get 30% more land each plus about 25 tiles per city state.
+	if players <= 2 then land = land * 1.3 + cs * 25 end
 	OvalSetSpans();
 	local area = land / ({0.92, 0.88, 0.78})[OvalOpt("shape")];	-- bays lose part of the oval (rough coast more)
 	local a = math.sqrt(area * OVAL_ASPECT / math.pi);
@@ -734,6 +955,10 @@ function OvalRollSea()
 		oIslandAmount = 1.0;
 		oSeaRich = 2;
 	end
+	-- 11-16 (user): on a 2-player map no islands link the two sides.
+	if OvalCountMajors() <= 2 and oIslandMode ~= 3 then
+		oIslandMode = 3;
+	end
 	oSeaLog = ({"chain", "scattered", "none"})[oIslandMode] .. " x" .. oIslandAmount .. " sea " .. ({"poor", "normal", "rich"})[oSeaRich];
 	print("Mirror Map: Pangaea - islands", oSeaLog);
 end
@@ -1115,7 +1340,9 @@ end
 function OvalAddLakes()
 	local west = {};
 	for i = 0, oN - 1 do
-		if oKind[i] == OVAL_WEST and oMain[i] and oPlot[i] == PlotTypes.PLOT_LAND and oAxisDist[i] > 2.5 then
+		local lakeOK = oAxisDist[i] > 2.5;
+		if OvalMiddleLevel() >= 2 and oAxisDist[i] <= oA * 0.3 then lakeOK = false end
+		if oKind[i] == OVAL_WEST and oMain[i] and oPlot[i] == PlotTypes.PLOT_LAND and lakeOK then
 			local inland = true;
 			for _, j in ipairs(OvalRing(i, 1, 2)) do if OvalIsWater(j) then inland = false; break end end
 			if inland then table.insert(west, i) end
@@ -1275,8 +1502,18 @@ function OvalAddRivers()
 	end
 	OvalShuffle(midSources);
 	OvalShuffle(otherSources);
+	local midWant = math.max(3, math.floor(westLand / 50));
+	local lvl = OvalMiddleLevel();
+	if lvl == 2 then midWant = 1 end
+	if lvl == 3 then
+		midWant = 0;
+		-- other rivers may not start in the middle either
+		local keep = {};
+		for _, v in ipairs(otherSources) do if oAxisDist[math.floor(v / 2)] > oA * 0.3 then table.insert(keep, v) end end
+		otherSources = keep;
+	end
 	local rounds = {
-		{midSources, math.max(3, math.floor(westLand / 50))},
+		{midSources, midWant},
 		{otherSources, math.max(2, math.floor(westLand / 40))},
 	};
 	local made = 0;
@@ -1287,6 +1524,7 @@ function OvalAddRivers()
 	-- one river crossing the continent from coast to coast, flowing outwards.
 	-- One, two when there are 3+ players a side.
 	local nCross = (math.max(#oWestPlayers, #oEastPlayers) >= 3) and 2 or 1;
+	if OvalMiddleLevel() >= 2 then nCross = 0 end	-- 11-16: no river across the middle
 	local axisTiles = {};
 	for i = 0, oN - 1 do
 		if oKind[i] == OVAL_AXIS and oMain[i] and OvalIsLand(i) and oSeamDist[i] > 2 then
@@ -1320,6 +1558,7 @@ function OvalAddRivers()
 		for _, i in ipairs(more) do table.insert(axisTiles, i) end
 		nCross = 1;
 	end
+	if OvalMiddleLevel() >= 2 then nCross = 0 end	-- 11-16: no river across the middle
 	local function RotatedStart(A)
 		-- the corner of the A | copy edge whose third plot is on the west side
 		local tA = oTwin[A];
@@ -2220,6 +2459,15 @@ function OvalPlaceCapitalResources()
 	local R = GameInfoTypes or {};
 	local function ID(t) return R[t] or GameInfo.Resources[t].ID end
 	OvalShuffle(oLuxLand);
+	-- 11-16 (user: "same amount of luxes for each side no matter map size"):
+	-- the whole map uses a pool by world size (OVAL_LUX_LAND_TYPES) and 1 sea
+	-- type (each side sees the same ones). With more players than land types,
+	-- players share regional types.
+	local ws = (Map.GetWorldSize ~= nil) and Map.GetWorldSize() or 3;
+	local landTypes = OVAL_LUX_LAND_TYPES[ws] or 9;
+	while #oLuxLand > landTypes do table.remove(oLuxLand) end
+	OvalShuffle(oLuxSea);
+	while #oLuxSea > 1 do table.remove(oLuxSea) end
 	oRegionalLux = {};
 	local usedLux = {};
 	for c, s in ipairs(oStarts) do
@@ -2257,8 +2505,10 @@ function OvalPlaceCapitalResources()
 	for c, s in ipairs(oStarts) do
 		-- the unused type with the most room around this capital
 		local best, bestN = nil, -1;
+		local allUsed = true;
+		for _, lux in ipairs(oLuxLand) do if not usedLux[lux] then allUsed = false end end
 		for _, lux in ipairs(oLuxLand) do
-			if not usedLux[lux] then
+			if allUsed or not usedLux[lux] then
 				local n = 0;
 				for _, j in ipairs(OvalRing(s, 2, 7)) do
 					if not OvalNoResHere(j) and oRes[j] == -1 and not oStartSet[j] and OvalFits(j, lux) then n = n + 1 end
@@ -2291,6 +2541,7 @@ function OvalPlaceCapitalResources()
 	for c, s in ipairs(oStarts) do
 		local list = {};
 		for _, l in ipairs(oLuxLand) do if not usedLux[l] then table.insert(list, l) end end
+		if #list == 0 then for _, l in ipairs(oLuxLand) do if l ~= oRegionalLux[c] then table.insert(list, l) end end end
 		OvalShuffle(list);
 		if not OvalEnsureAny(s, list, 2, 3, true) and not OvalEnsureAny(s, list, 1, 3, true) then
 			-- the land round a very coastal capital is full: a sea luxury instead
@@ -2300,6 +2551,9 @@ function OvalPlaceCapitalResources()
 	oUsedRegional = usedLux;
 end
 oRegionalLux, oUsedRegional = {}, {};
+-- 11-16 (user): luxury types on the map scale with the size: duel 4, tiny 6,
+-- small 8 (land types here, +1 sea type), bigger sizes a few more.
+OVAL_LUX_LAND_TYPES = {[0] = 3, [1] = 5, [2] = 7, [3] = 9, [4] = 10, [5] = 11};
 oStartFood, oStartFoodLog = {}, {};
 
 function OvalCountNear(s, resID, minR, maxR)
@@ -2446,15 +2700,19 @@ function OvalPlaceResources()
 	-- groups, evenly spread; about 1 per 14 land tiles
 	local free = {};
 	for _, l in ipairs(oLuxLand) do if not oUsedRegional[l] then table.insert(free, l) end end
+	if #free == 0 then for _, l in ipairs(oLuxLand) do table.insert(free, l) end end
 	OvalShuffle(free);
 	-- every type that is nobody's regional luxury, mixed (no clusters of one type)
 	local use = {};
-	for k = 1, #free do table.insert(use, free[k]) end
+	local keep = #free;	-- the fixed pool (OVAL_LUX_LAND_TYPES)
+	for k = 1, keep do table.insert(use, free[k]) end
 	OvalSpreadLux(use, 1 / 14);
 	-- sea luxuries: 1 per ~30 coast tiles
 	OvalSpread(oLuxSea, (coastN / math.max(1, landN)) / 16 * seaMult, 4, nil);
 	-- the shared centre line gets useful things (luxuries, strategics, food)
-	OvalCentreStuff(use);
+	-- 11-16 (user): no rich centre line on duel / tiny (both would have to rush it)
+	if OvalMiddleLevel() == 1 then OvalCentreStuff(use) end
+	OvalThinMiddle();
 	-- islands: worth a trip or not, by the sea roll
 	OvalIslandRiches(use);
 	-- start quality: no more food resources within 2 than the pair's roll allows
@@ -2493,6 +2751,57 @@ function OvalPlaceResources()
 			k = k + 1;
 		end
 	end
+end
+
+function OvalBarrenStrip()
+	-- 11-16 (user: Barren = "a divider almost", then "2-3 tiles wide, can be
+	-- plains, grassland, mostly flat, some few mountains"): a thin bare strip on
+	-- the centre line - the land keeps its terrain, hills go flat, forest /
+	-- jungle / marsh go, about 1 tile in 8 becomes a lone mountain.
+	if OvalMiddleLevel() ~= 3 then return end
+	local core = OVAL_BARREN_CORE;
+	for i = 0, oN - 1 do
+		if OvalIsWestOrAxis(i) and OvalIsLand(i) and oAxisDist[i] <= core and not OvalIsWonder(i) then
+			if oPlot[i] == PlotTypes.PLOT_HILLS then oPlot[i] = PlotTypes.PLOT_LAND end
+			oFeat[i] = -1;
+			if oPlot[i] == PlotTypes.PLOT_LAND and not oRiverSide[i] and OvalRand(8) == 0 then
+				local lone = true;
+				for _, j in ipairs(oNb[i]) do if j >= 0 and oPlot[j] == PlotTypes.PLOT_MOUNTAIN then lone = false end end
+				if lone then oPlot[i] = PlotTypes.PLOT_MOUNTAIN end
+			end
+		end
+	end
+	OvalMirrorAll();
+end
+OVAL_BARREN_CORE = 1.25;	-- hex widths from the centre line: a strip 2-3 tiles wide
+
+function OvalThinMiddle()
+	-- 11-16 (user): fewer resources in the middle band on "less" (a third left
+	-- out) and "barren" (two thirds, strategics too). Never near a capital.
+	local lvl = OvalMiddleLevel();
+	if lvl == 1 then return end
+	local drop = (lvl == 2) and 33 or 67;
+	local band = oA * 0.3;
+	local core = OVAL_BARREN_CORE;
+	local removed = 0;
+	for i = 0, oN - 1 do
+		local r = oRes[i];
+		if r ~= -1 and OvalIsWestOrAxis(i) and OvalIsLand(i) and oAxisDist[i] <= band and oRules[r] then
+			local kind = oRules[r][2];
+			local near = false;
+			for _, s in ipairs(oStarts) do if OvalDist(i, s) <= 3 or OvalDist(i, oTwin[s]) <= 3 then near = true end end
+			local can = kind == "bonus" or kind == "lux" or (lvl == 3 and kind ~= "sea" and kind ~= "sealux");
+			local d = drop;
+			if lvl == 3 and oAxisDist[i] <= core then d = 100 end
+			if not near and can and OvalRand(100) < d then
+				oRes[i] = -1; oResAmt[i] = 0;
+				local t = oTwin[i];
+				if t ~= nil and t >= 0 then oRes[t] = -1; oResAmt[t] = 0 end
+				removed = removed + 1;
+			end
+		end
+	end
+	print("Mirror Map: Pangaea - middle level", lvl, "resources left out", removed);
 end
 
 function OvalSpreadLux(types, perTile)
@@ -2997,6 +3306,7 @@ function GenerateMap()
 			oRiverSide[oTwin[r[1]]] = true; oRiverSide[oTwin[r[2]]] = true;
 		end
 		OvalAddFeatures();
+		OvalBarrenStrip();
 		oLakeAtStart = OvalLakeSet();
 		OvalSetupBias();
 		OvalChooseStarts();
@@ -3041,4 +3351,6 @@ function GenerateMap()
 	end
 	Map.DefaultContinentStamper();
 	print("Mirror Map: Pangaea - done", oW, oH);
+	-- city states: max 1 luxury + quality option (twins treated the same)
+	CSQ_Run(CSQ_Level(), function(i) local t = oTwin[i]; if t ~= nil and t >= 0 then return t end return nil end);
 end

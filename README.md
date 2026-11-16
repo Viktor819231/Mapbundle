@@ -1,21 +1,21 @@
-# KEK map bundle 1.2
+# KEK map bundle 1.3
 
 Fair map scripts for Civilization V: Brave New World multiplayer (made for KEK Mod, also work without it).
 
 ## Download
 
-Get **KEK-Maps-1.2.zip** from the [Releases](../../releases) page (older versions are there too), or *Code → Download ZIP*.
+Get **KEK-Maps-1.3.zip** from the [Releases](../../releases) page (older versions are there too), or *Code → Download ZIP*.
 
 ## Install
 
 1. Unzip. You get a folder **KEK Maps**.
 2. Put it in `Steam\steamapps\common\Sid Meier's Civilization V\Assets\Maps\`
-   so you have `Assets\Maps\KEK Maps\MirrorSkirmish_v1.2.lua` and so on.
+   so you have `Assets\Maps\KEK Maps\MirrorSkirmish_v1.3.lua` and so on.
 3. Start Civ V. The maps are in the map list.
 
 **Every player in the game needs the same files.**
 
-Every file and every map name carries the bundle version (`MirrorSkirmish_v1.2.lua` = "Mirror Map: Skirmish 1.2"). Different versions can sit side by side; in the lobby, pick a map with the same version number for everyone.
+Every file and every map name carries the bundle version (`MirrorSkirmish_v1.3.lua` = "Mirror Map: Skirmish 1.3"). Different versions can sit side by side; in the lobby, pick a map with the same version number for everyone.
 
 ## The maps
 
@@ -24,7 +24,7 @@ Every file and every map name carries the bundle version (`MirrorSkirmish_v1.2.l
 | Map | What it is |
 |---|---|
 | Mirror Map: Skirmish | The game's Skirmish (all land), exact left-right mirror, a dead strip in the middle (or none). Every capital gets Horses, Iron, Coal and Aluminium within 3 tiles. |
-| Mirror Map: Pangaea | One oval continent, mirrored left-right, with a wide open middle. Resources spread evenly, a richer middle band worth fighting for. Land per player: about 90 tiles by default (75 / 105 / 125 as options). |
+| Mirror Map: Pangaea | One oval continent, mirrored left-right, with a wide open middle. Resources spread evenly. "Middle of the map" option: Rich / Normal / Barren (a bare 2-3 tile strip, almost a divider); Normal is calmer on duel and tiny. Duel maps are bigger, with no islands linking the two sides. Luxury types scale with map size (duel 4, tiny 6, small 8, regional ones included). Land per player: about 90 tiles by default (75 / 105 / 125 as options). |
 | Mirror Map: KEK Archipelago | Our KEK Archipelago, mirrored: start islands with islands of every size around them. Many options (island size, hills, resources, Fish, deep ocean). |
 | Mirror Map: East vs West | Mirrored, one team in the east, one in the west. |
 | Mirror Map: Ring | Mirrored ring-shaped land. |
@@ -38,6 +38,8 @@ Every file and every map name carries the bundle version (`MirrorSkirmish_v1.2.l
 | KEK BitMoreFairPangea 1.3 | The game's Pangaea with the bad outcomes lifted, the rest left as the game makes it. See below. |
 
 Every map has its options on the game setup screen (map size, land, hills, resources, ...).
+
+**City states (all maps, 1.3):** a city state has at most 1 luxury within 3 tiles (Mercantile ones 2), and a "City states" option: Poor (at most 1 food resource nearby) / Normal / Rich (at least 4 food resources and a Stone).
 
 ## KEK BitMoreFairPangea 1.3
 
