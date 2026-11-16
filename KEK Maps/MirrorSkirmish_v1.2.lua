@@ -1,4 +1,3 @@
-MIRROR_VARIANT = "eastwest";
 ------------------------------------------------------------------------------
 --	FILE:	 MirrorSkirmish.lua
 --	AUTHOR:  Bob Thomas (Sirian) - the original Skirmish.lua this map is built on
@@ -76,7 +75,7 @@ MirrorBase_AddLakes = AddLakes;
 ------------------------------------------------------------------------------
 function MirrorSkirmishScriptInfo()
 	return {
-		Name = "Mirror Map: Skirmish 1.1",
+		Name = "Mirror Map: Skirmish 1.2",
 		Description = "The game's Skirmish (all land) with an exact left-right mirror and a dead strip in the middle (or none). Starts, rivers, resources, ruins and city states are mirrored, one team per side. Strategic balance: every capital gets Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles.",
 		IconAtlas = "WORLDTYPE_ATLAS_2",
 		IconIndex = 0,
@@ -436,10 +435,10 @@ function GetMapScriptInfo()
 		return MirrorSkirmishScriptInfo();
 	end
 	local names = {
-		pangaea = {"Mirror Map: Pangaea 1.1", "The game's Pangaea (one continent, ocean around it), with an exact left-right mirror, one team per side. Optional strip down the middle. Strategic balance: every capital gets Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles."},
-		archipelago = {"Mirror Map: KEK Archipelago 1.1", "Our KEK Archipelago, mirrored left-right for team games. Every player starts on an island of 20-40 tiles (option, up to 30-50), with islands of every size (1-30 tiles) all over the map and clusters of smaller islands; extra hills, Fish spread evenly, more coastal luxuries and atolls. Every player also gets an own 16-tile expansion island off their coast (option), and small islands get extra Fish. Options for sizes, gaps, shapes, ocean and resources. Strategic balance: Horses, Iron (9), Coal (7) and Aluminium (3) within 3 tiles of every capital."},
-		eastwest = {"Mirror Map: East vs West 1.1", "The game's West vs East, mirrored: all land with a water channel down the middle, one team per side. At least one player of each team starts on the coast. Strategic balance: Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles of every capital."},
-		ring = {"Mirror Map: Ring 1.1", "The game's Ring, mirrored: a loop of land joining one sub-continent per player, a polar island with the city states in the middle. Teams start on the west and east halves. Strategic balance: Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles of every capital."},
+		pangaea = {"Mirror Map: Pangaea 1.2", "The game's Pangaea (one continent, ocean around it), with an exact left-right mirror, one team per side. Optional strip down the middle. Strategic balance: every capital gets Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles."},
+		archipelago = {"Mirror Map: KEK Archipelago 1.2", "Our KEK Archipelago, mirrored left-right for team games. Every player starts on an island of 20-40 tiles (option, up to 30-50), with islands of every size (1-30 tiles) all over the map and clusters of smaller islands; extra hills, Fish spread evenly, more coastal luxuries and atolls. Every player also gets an own 16-tile expansion island off their coast (option), and small islands get extra Fish. Options for sizes, gaps, shapes, ocean and resources. Strategic balance: Horses, Iron (9), Coal (7) and Aluminium (3) within 3 tiles of every capital."},
+		eastwest = {"Mirror Map: East vs West 1.2", "The game's West vs East, mirrored: all land with a water channel down the middle, one team per side. At least one player of each team starts on the coast. Strategic balance: Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles of every capital."},
+		ring = {"Mirror Map: Ring 1.2", "The game's Ring, mirrored: a loop of land joining one sub-continent per player, a polar island with the city states in the middle. Teams start on the west and east halves. Strategic balance: Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles of every capital."},
 	};
 	local options = {};
 	for n, def in ipairs(MirrorVisibleOptionDefs()) do

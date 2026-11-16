@@ -10,10 +10,12 @@ Get **KEK-Maps-1.2.zip** from the [Releases](../../releases) page (older version
 
 1. Unzip. You get a folder **KEK Maps**.
 2. Put it in `Steam\steamapps\common\Sid Meier's Civilization V\Assets\Maps\`
-   so you have `Assets\Maps\KEK Maps\MirrorSkirmish.lua` and so on.
+   so you have `Assets\Maps\KEK Maps\MirrorSkirmish_v1.2.lua` and so on.
 3. Start Civ V. The maps are in the map list.
 
 **Every player in the game needs the same files.**
+
+Every file and every map name carries the bundle version (`MirrorSkirmish_v1.2.lua` = "Mirror Map: Skirmish 1.2"). Different versions can sit side by side; in the lobby, pick a map with the same version number for everyone.
 
 ## The maps
 

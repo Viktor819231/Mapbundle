@@ -80,7 +80,7 @@ function GetMapScriptInfo()
 		SortPriority = 1,
 	};
 	return {
-		Name = "KEK BitMoreFairPangea 1.3",
+		Name = "KEK BitMoreFairPangea 1.2",
 		Description = "The game's Pangaea with fewer hopeless starts: more land (option), open sea lanes near the poles, no mountain walls around capitals, richer tundra and grassland, tundra capitals on a hill or river, weak capitals get hills and food bonuses, Strategic Balance adds Coal and Aluminium near every capital.",
 		IsAdvancedMap = false,
 		IconIndex = 0,

@@ -97,7 +97,7 @@ function GetMapScriptInfo()
 	-- Same list as Large Islands; Strategic Balance (5) is the default here.
 	resources.DefaultValue = 5;
 	return {
-		Name = "KEK Large Islands 1.1",
+		Name = "KEK Large Islands 1.2",
 		Description = "The game's Large Islands, fair for free for all: every player starts alone on an own island, all start islands have the same size, hills and mountains, spread out and away from the poles. Strategic Balance: 12 Iron, Coal and Aluminium near every capital. Hills and land resource options as KEK Archipelago.",
 		IsAdvancedMap = false,
 		IconIndex = 2,
