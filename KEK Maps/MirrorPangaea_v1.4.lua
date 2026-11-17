@@ -5,9 +5,9 @@
 -- finished map. No dice: on mirror maps twins get exactly the same treatment
 -- (choices are ordered by distance, then by the smaller of a plot and its twin).
 CSQ_VALUES = {
-	{"Poor", "City states get little: at most 1 food resource within 2 tiles, no Stone added. Always at most 1 luxury (Mercantile 2)."},
+	{"Poor", "City states get little: at most 1 food resource within 2 tiles. Always at most 1 luxury (Mercantile 2)."},
 	{"Normal", "The map's own city states. Always at most 1 luxury within 3 tiles (Mercantile 2)."},
-	{"Rich", "City states worth taking: at least 4 food resources within 2 tiles and a Stone within 3. Always at most 1 luxury (Mercantile 2)."},
+	{"Rich", "City states worth taking: at least 4 food resources within 2 tiles. Always at most 1 luxury (Mercantile 2)."},
 };
 function CSQ_OptionDef()
 	return {Name = "City states", Values = CSQ_VALUES, DefaultValue = 2, SortPriority = 99};
@@ -115,7 +115,7 @@ function CSQ_Run(level, twinOf)
 			if t ~= nil and t >= 0 and t ~= Idx(p) then Map.GetPlotByIndex(t):SetResourceType(r, amt or 0) end
 		end
 	end
-	local log = {cs = 0, luxOff = 0, foodOff = 0, foodOn = 0, stone = 0};
+	local log = {cs = 0, luxOff = 0, foodOff = 0, foodOn = 0};
 	-- the city states to treat: on mirror maps only one of each twin pair (the
 	-- one with the smaller plot index); its changes are copied to the twin
 	local list = {};
@@ -177,26 +177,11 @@ function CSQ_Run(level, twinOf)
 						if r ~= nil then Set(e[1], r, 1); food = food + 1; log.foodOn = log.foodOn + 1 end
 					end
 				end
-				local stone = Res("RESOURCE_STONE");
-				local has = false;
-				for _, e in ipairs(around) do if e[1]:GetResourceType(-1) == stone then has = true end end
-				if not has and stone ~= nil then
-					for _, e in ipairs(around) do
-						local p = e[1];
-						if e[2] >= 2 and not p:IsWater() and not p:IsMountain() and p:GetResourceType(-1) == -1
-							and p:GetImprovementType() == -1 and p:GetFeatureType() == FeatureTypes.NO_FEATURE
-							and (p:GetTerrainType() == TerrainTypes.TERRAIN_PLAINS or p:GetTerrainType() == TerrainTypes.TERRAIN_GRASS
-								or p:GetTerrainType() == TerrainTypes.TERRAIN_DESERT or p:GetTerrainType() == TerrainTypes.TERRAIN_TUNDRA)
-							and not NearMajor(p) then
-							Set(p, stone, 1); log.stone = log.stone + 1; break;
-						end
-					end
-				end
 			end
 		end
 	end
 	print("City states (level " .. level .. "):", log.cs, "city states, luxuries removed", log.luxOff,
-		"food removed", log.foodOff, "food added", log.foodOn, "stone added", log.stone);
+		"food removed", log.foodOff, "food added", log.foodOn);
 end
 -- <<< CITY STATE QUALITY END >>>
 ------------------------------------------------------------------------------
@@ -321,7 +306,7 @@ function GetMapScriptInfo()
 	end
 	table.insert(options, CSQ_OptionDef());	-- always last (CSQ_Level reads the last option)
 	return {
-		Name = "Mirror Map: Pangaea 1.3",
+		Name = "Mirror Map: Pangaea 1.4",
 		Description = "One big continent cut in half by a mirror line, one team per half. No divider: the halves run into each other across a wide middle. Resources spread evenly over the whole land. Wraps east-west: small islands across the ocean link the coastal starts at the back ends. Every capital gets Horses, Iron, Coal and Aluminium within 3 tiles.",
 		IconAtlas = "WORLDTYPE_ATLAS_2",
 		IconIndex = 0,

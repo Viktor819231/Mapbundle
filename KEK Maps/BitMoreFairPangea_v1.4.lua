@@ -5,9 +5,9 @@
 -- finished map. No dice: on mirror maps twins get exactly the same treatment
 -- (choices are ordered by distance, then by the smaller of a plot and its twin).
 CSQ_VALUES = {
-	{"Poor", "City states get little: at most 1 food resource within 2 tiles, no Stone added. Always at most 1 luxury (Mercantile 2)."},
+	{"Poor", "City states get little: at most 1 food resource within 2 tiles. Always at most 1 luxury (Mercantile 2)."},
 	{"Normal", "The map's own city states. Always at most 1 luxury within 3 tiles (Mercantile 2)."},
-	{"Rich", "City states worth taking: at least 4 food resources within 2 tiles and a Stone within 3. Always at most 1 luxury (Mercantile 2)."},
+	{"Rich", "City states worth taking: at least 4 food resources within 2 tiles. Always at most 1 luxury (Mercantile 2)."},
 };
 function CSQ_OptionDef()
 	return {Name = "City states", Values = CSQ_VALUES, DefaultValue = 2, SortPriority = 99};
@@ -115,7 +115,7 @@ function CSQ_Run(level, twinOf)
 			if t ~= nil and t >= 0 and t ~= Idx(p) then Map.GetPlotByIndex(t):SetResourceType(r, amt or 0) end
 		end
 	end
-	local log = {cs = 0, luxOff = 0, foodOff = 0, foodOn = 0, stone = 0};
+	local log = {cs = 0, luxOff = 0, foodOff = 0, foodOn = 0};
 	-- the city states to treat: on mirror maps only one of each twin pair (the
 	-- one with the smaller plot index); its changes are copied to the twin
 	local list = {};
@@ -177,26 +177,11 @@ function CSQ_Run(level, twinOf)
 						if r ~= nil then Set(e[1], r, 1); food = food + 1; log.foodOn = log.foodOn + 1 end
 					end
 				end
-				local stone = Res("RESOURCE_STONE");
-				local has = false;
-				for _, e in ipairs(around) do if e[1]:GetResourceType(-1) == stone then has = true end end
-				if not has and stone ~= nil then
-					for _, e in ipairs(around) do
-						local p = e[1];
-						if e[2] >= 2 and not p:IsWater() and not p:IsMountain() and p:GetResourceType(-1) == -1
-							and p:GetImprovementType() == -1 and p:GetFeatureType() == FeatureTypes.NO_FEATURE
-							and (p:GetTerrainType() == TerrainTypes.TERRAIN_PLAINS or p:GetTerrainType() == TerrainTypes.TERRAIN_GRASS
-								or p:GetTerrainType() == TerrainTypes.TERRAIN_DESERT or p:GetTerrainType() == TerrainTypes.TERRAIN_TUNDRA)
-							and not NearMajor(p) then
-							Set(p, stone, 1); log.stone = log.stone + 1; break;
-						end
-					end
-				end
 			end
 		end
 	end
 	print("City states (level " .. level .. "):", log.cs, "city states, luxuries removed", log.luxOff,
-		"food removed", log.foodOff, "food added", log.foodOn, "stone added", log.stone);
+		"food removed", log.foodOff, "food added", log.foodOn);
 end
 -- <<< CITY STATE QUALITY END >>>
 ------------------------------------------------------------------------------
@@ -205,11 +190,11 @@ end
 --	         (Bob Thomas)
 --	PURPOSE: The game's own Pangaea (same land, options, sizes, wrap), with
 --	         fewer hopeless starts. NOT mirrored.
---	         1. Terrain, whole map, light: about 15% of flat tundra and about 4%
+--	         1. Terrain, whole map, light: about 8% of flat tundra and about 4%
 --	            of flat grassland / jungle becomes hills.
 --	         2. Start lifts, only for starts that fail a check (a start that
 --	            passes is not touched; luxuries are never added):
---	            - at least 1 hill within 2 tiles (weak start: 2);
+--	            - weak start: at least 2 hills within 2 tiles (ordinary starts: none added, 11-17);
 --	            - at least 2 food bonus resources within 3 tiles (weak start: 3);
 --	            - a start whose luxuries within 2 tiles are all plantation
 --	              ("calendar") luxuries and has no food bonus within 2 tiles
@@ -218,7 +203,7 @@ end
 --	              snow or flat desert without flood plains): also up to 2 snow
 --	              tiles within 2 tiles become tundra.
 --	         0. Continent shape: a snaky continent (thin arms all over the map,
---	            big inland seas) is rolled again; ordinary peninsulas stay.
+--	            big inland seas) is rolled again (option "Snaky land"); ordinary peninsulas stay.
 --	         3. Strategic Balance (the default resource setting here): every
 --	            capital gets Horses, Iron, Coal (7) and Aluminium (3) within
 --	            3 tiles.
@@ -280,13 +265,31 @@ function GetMapScriptInfo()
 		DefaultValue = 1,
 		SortPriority = 1,
 	};
+	local capFood = {
+		Name = "Capital food",
+		Values = {
+			{"Game's own", "No extra food bonus at capitals: only what the game itself places."},
+			{"Extra food bonus", "A capital with few food resources gets up to 2 (weak start 3) food bonus within 3 tiles, rings 1-2 first."},
+		},
+		DefaultValue = 1,
+		SortPriority = 2,
+	};
+	local snaky = {
+		Name = "Snaky land",
+		Values = {
+			{"Reroll", "A snaky continent (long thin arms, big inland seas) is rolled again; ordinary peninsulas stay."},
+			{"Keep", "The continent is used as the game makes it, snaky or not."},
+		},
+		DefaultValue = 1,
+		SortPriority = 3,
+	};
 	return {
-		Name = "KEK BitMoreFairPangea 1.3",
-		Description = "The game's Pangaea with fewer hopeless starts: more land (option), open sea lanes near the poles, no mountain walls around capitals, richer tundra and grassland, tundra capitals on a hill or river, weak capitals get hills and food bonuses, Strategic Balance adds Coal and Aluminium near every capital.",
+		Name = "KEK BitMoreFairPangea 1.4",
+		Description = "The game's Pangaea with fewer hopeless starts: more land (option), snaky continents rolled again (option), no mountain walls around capitals, richer tundra and grassland, weak capitals get hills (food bonuses: option), Strategic Balance adds Coal and Aluminium near every capital.",
 		IsAdvancedMap = false,
 		IconIndex = 0,
 		SortIndex = 2,
-		CustomOptions = {world_age, temperature, rainfall, sea_level, resources, land, CSQ_OptionDef()},
+		CustomOptions = {world_age, temperature, rainfall, sea_level, resources, land, capFood, snaky, CSQ_OptionDef()},
 	}
 end
 ------------------------------------------------------------------------------
@@ -461,7 +464,7 @@ function PangaeaFractalWorld:GeneratePlotTypes(args)
 			-- seen is used. Ordinary peninsulas pass, so maps still differ.
 			local stringy = FairStringiness(biggest_area:GetID());
 			fair_shapeLog = (fair_shapeLog or "") .. string.format("%.2f ", stringy);
-			if stringy <= FAIR_MAX_STRINGY * math.pow(self.iNumPlotsX / 80, 0.7) then	-- bigger maps are naturally more ragged
+			if Map.GetCustomOption(8) == 2 or stringy <= FAIR_MAX_STRINGY * math.pow(self.iNumPlotsX / 80, 0.7) then	-- option 8 "Snaky land" = Keep: no reroll	-- bigger maps are naturally more ragged
 				done = true;
 				iBiggestID = biggest_area:GetID();
 			else
@@ -667,8 +670,9 @@ function PangaeaFractalWorld:GeneratePlotTypes(args)
 	end
 
 	-- BitMoreFair: open sea lanes near the poles, so ships can usually sail around.
+	-- User 11-17: no sea lanes any more, the poles are the game's own.
 	fair_seaLanes, fair_laneIce = {}, {};
-	for loop, south in ipairs({true, false}) do
+	for loop, south in ipairs({}) do
 		if Map.Rand(100, "BitMoreFairPangea - sea lane") < FAIR_SEA_LANE_PERCENT then
 			table.insert(fair_seaLanes, (south and "south " or "north ") .. FairSeaLane(self.plotTypes, self.iNumPlotsX, self.iNumPlotsY, south));
 		end
@@ -1396,13 +1400,13 @@ fair_startPlotDatabase = nil;	-- GLOBAL the AssignStartingPlots instance
 fair_liftLog = {};				-- GLOBAL what the start lifts did, one entry per major start
 fair_tweakCounts = nil;			-- GLOBAL what the terrain tweak did
 
-FAIR_TUNDRA_HILLS_PERCENT = 15;	-- share of flat tundra that becomes hills (user 11-16: hillier tundra)
-FAIR_TUNDRA_SHEEP_PERCENT = 15;	-- share of free bare tundra hills that get Sheep (none next to another Sheep)
-FAIR_TUNDRA_EMPTY_FOREST_PERCENT = 45;	-- empty flat tundra (nothing on it or next to it): forest
-FAIR_TUNDRA_FOREST_PERCENT = 20;	-- share of bare tundra (flat or hills) that gets a forest
-FAIR_TUNDRA_DEER_PERCENT = 8;	-- share of free tundra tiles that get Deer (none next to another Deer)
-FAIR_GREEN_HILLS_PERCENT = 1.5;	-- share of flat grassland that becomes hills (1.2: grassland only, no jungle; user 11-16: halved from 3)
-FAIR_GRASS_CATTLE_PERCENT = 12;	-- empty flat grassland (nothing on it or next to it, no river): Cattle
+FAIR_TUNDRA_HILLS_PERCENT = 5;	-- share of flat tundra that becomes hills (user 11-16: hillier tundra; 11-17 toned down from 15)
+FAIR_TUNDRA_SHEEP_PERCENT = 8;	-- share of free bare tundra hills that get Sheep (none next to another Sheep)
+FAIR_TUNDRA_EMPTY_FOREST_PERCENT = 15;	-- 11-17: toned down from 45	-- empty flat tundra (nothing on it or next to it): forest
+FAIR_TUNDRA_FOREST_PERCENT = 6;	-- 11-17: toned down from 20; share of bare tundra (flat or hills) that gets a forest
+FAIR_TUNDRA_DEER_PERCENT = 5;	-- 11-17 "land about 10% worse": extras trimmed (hills 8->5, sheep 15->8, forest 10->6/25->15, deer 8->5, grass hills 1.5->0.5, cattle 12->4)	-- share of free tundra tiles that get Deer (none next to another Deer)
+FAIR_GREEN_HILLS_PERCENT = 0.5;	-- share of flat grassland that becomes hills (1.2: grassland only, no jungle; user 11-16: halved from 3)
+FAIR_GRASS_CATTLE_PERCENT = 4;	-- empty flat grassland (nothing on it or next to it, no river): Cattle
 FAIR_WEAK_SHARE_PERCENT = 40;	-- weak start: this share (or more) of the land within 2 tiles is sparse
 ------------------------------------------------------------------------------
 -- WHOLE MAP: a few more hills (mostly tundra)
@@ -1763,7 +1767,7 @@ function FairLiftStart(asp, region_number)
 	local log = {region = region_number, x = x, y = y, weak = m.weak, land = m.land, sparse = m.sparse,
 		hillsBefore = m.hills, bonusBefore = m.bonus3, calendar = m.calendar,
 		snow = 0, hills = 0, bonus = 0, calendarBonus = 0};
-	local hillsWanted = m.weak and 2 or 1;
+	local hillsWanted = m.weak and 2 or 0;	-- user 11-17: no hill lift for ordinary starts
 	local bonusWanted = m.weak and 3 or 2;
 
 	-- Hopeless start (user, 11-16: the floor, not a rewrite): weak, no fresh water
@@ -1792,7 +1796,7 @@ function FairLiftStart(asp, region_number)
 		end
 	end
 
-	-- Tundra start (user, 11-16): the settler stands on a river or a hill, and the
+	-- Tundra start (user, 11-16; 11-17: no forced capital hill, 2 forests): the
 	-- flat tundra around it is not bare: up to 3 bare flat tundra tiles within 2 get forest.
 	local tundraLand, land2 = 0, 0;
 	for loop, plot in ipairs(FairPlotsInRings(x, y, 1, 2)) do
@@ -1804,7 +1808,7 @@ function FairLiftStart(asp, region_number)
 	log.tundraStart = capital:GetTerrainType() == TerrainTypes.TERRAIN_TUNDRA or (land2 > 0 and tundraLand * 100 >= land2 * 40);
 	log.capitalHill, log.tundraForest = 0, 0;
 	if log.tundraStart then
-		if not capital:IsRiver() and capital:GetPlotType() == PlotTypes.PLOT_LAND then
+		if false then	-- user 11-17: no guaranteed hill under the capital
 			capital:SetPlotType(PlotTypes.PLOT_HILLS, false, true);
 			log.capitalHill = 1;
 		end
@@ -1818,7 +1822,7 @@ function FairLiftStart(asp, region_number)
 				end
 			end
 			for loop, plot in ipairs(FairShuffled(list)) do
-				if log.tundraForest >= 3 then break end
+				if log.tundraForest >= 2 then break end
 				plot:SetFeatureType(forest.ID, -1);
 				log.tundraForest = log.tundraForest + 1;
 			end
@@ -1853,10 +1857,12 @@ function FairLiftStart(asp, region_number)
 		log.hills = log.hills + 1;
 	end
 
-	-- Food bonus within 3 tiles (rings 1-2 first).
+	-- Food bonus within 3 tiles (rings 1-2 first). Only with the "Capital food"
+	-- option on "Extra food bonus" (user, 11-17: off by default).
+	local foodOn = (Map.GetCustomOption(7) == 2);
 	local bonus = m.bonus3;
 	local bonus2 = m.bonus2;
-	while bonus < bonusWanted do
+	while foodOn and bonus < bonusWanted do
 		local placed = FairAddBonus(asp, x, y, 1, 2) or FairAddBonus(asp, x, y, 3, 3);
 		if not placed then break end
 		bonus = bonus + 1;
@@ -1864,7 +1870,7 @@ function FairLiftStart(asp, region_number)
 	end
 
 	-- Calendar luxuries and no food bonus within 2 tiles: one food bonus within 2.
-	if m.calendar then
+	if foodOn and m.calendar then
 		bonus2 = FairMeasureStart(x, y).bonus2;
 		if bonus2 == 0 and FairAddBonus(asp, x, y, 1, 2) then
 			log.calendarBonus = 1;
@@ -1934,9 +1940,9 @@ end
 ------------------------------------------------------------------------------
 ------------------------------------------------------------------------------
 function FairCityStateBoost(asp)
-	-- City states worth taking (user, 11-14): within 2 tiles every city state
-	-- gets at least 3 food bonus (land bonus or Fish) and within 3 tiles a Stone.
-	-- Bonus resources only (user, 11-16): no extra luxuries or strategics.
+	-- City states worth taking (user, 11-17): a city state either has fresh water
+	-- or at least 3 resources within 2 tiles; one without fresh water is topped up
+	-- to 3 with food bonus (Fish or land bonus). No Stone, luxuries or strategics.
 	if asp.cityStatePlots == nil then return end
 	FairLoadResourceRules();
 	local iW, iH = Map.GetGridSize();
@@ -1968,7 +1974,7 @@ function FairCityStateBoost(asp)
 		if u == 0 then return "bonus" elseif u == 2 then return "lux" end
 		return "strategic";
 	end
-	local log = {cs = 0, food = 0, stone = 0};
+	local log = {cs = 0, food = 0};
 	for cs_number, data in pairs(asp.cityStatePlots) do
 		local x, y = data[1], data[2];
 		local csPlot = (x ~= nil and y ~= nil) and Map.GetPlot(x, y) or nil;
@@ -1979,7 +1985,7 @@ function FairCityStateBoost(asp)
 				if OK(plot) then
 					local d = Map.PlotDistance(x, y, plot:GetX(), plot:GetY());
 					local k = Kind(plot:GetResourceType(-1));
-					if k == "bonus" and d <= 2 then food = food + 1 end
+					if k ~= nil and d <= 2 then food = food + 1 end
 					if k == "lux" then lux = lux + 1 end
 					if k == nil and plot:GetImprovementType() == -1 and not plot:IsMountain() then
 						if plot:IsWater() then
@@ -2007,6 +2013,7 @@ function FairCityStateBoost(asp)
 			end
 			-- food: Fish on the coast first (city states are mostly coastal), then land bonus
 			local tries = 0;
+			if csPlot:IsFreshWater() then food = 3 end	-- fresh water: left as the map made it
 			while food < 3 and tries < 8 do
 				tries = tries + 1;
 				local placed = false;
@@ -2020,20 +2027,7 @@ function FairCityStateBoost(asp)
 				end
 				if placed then food = food + 1; log.food = log.food + 1 end
 			end
-			-- 1.2 (user, 11-16): no extra luxuries or strategics, only bonus resources:
-			-- one Stone within 3 tiles when there is none (production for the city).
-			local stone = GameInfo.Resources["RESOURCE_STONE"];
-			if stone ~= nil and table.maxn(freeLand3) > 0 then
-				local has = false;
-				for loop, plot in ipairs(FairPlotsInRings(x, y, 1, 3)) do
-					if plot:GetResourceType(-1) == stone.ID then has = true end
-				end
-				if not has then
-					local p = Take(freeLand3, function(p) return FairResourceFits(p, stone.ID, false) end);
-					if p ~= nil then p:SetResourceType(stone.ID, 1); log.stone = log.stone + 1 end
-				end
-			end
 		end
 	end
-	print("City state boost: city states", log.cs, "food bonus +", log.food, "Stone +", log.stone);
+	print("City state boost: city states", log.cs, "food bonus +", log.food);
 end

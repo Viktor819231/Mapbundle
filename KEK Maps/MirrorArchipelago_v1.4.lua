@@ -1,4 +1,4 @@
-MIRROR_VARIANT = "ring";
+MIRROR_VARIANT = "archipelago";
 -- >>> CITY STATE QUALITY (shared by every KEK map; source: mirror-map/CityStateQuality.lua,
 -- pasted into each script by tools/sync_csq.py - edit there, then run it) <<<
 -- User 11-16: a city state has at most 1 luxury within 3 tiles (Mercantile ones
@@ -6,9 +6,9 @@ MIRROR_VARIANT = "ring";
 -- finished map. No dice: on mirror maps twins get exactly the same treatment
 -- (choices are ordered by distance, then by the smaller of a plot and its twin).
 CSQ_VALUES = {
-	{"Poor", "City states get little: at most 1 food resource within 2 tiles, no Stone added. Always at most 1 luxury (Mercantile 2)."},
+	{"Poor", "City states get little: at most 1 food resource within 2 tiles. Always at most 1 luxury (Mercantile 2)."},
 	{"Normal", "The map's own city states. Always at most 1 luxury within 3 tiles (Mercantile 2)."},
-	{"Rich", "City states worth taking: at least 4 food resources within 2 tiles and a Stone within 3. Always at most 1 luxury (Mercantile 2)."},
+	{"Rich", "City states worth taking: at least 4 food resources within 2 tiles. Always at most 1 luxury (Mercantile 2)."},
 };
 function CSQ_OptionDef()
 	return {Name = "City states", Values = CSQ_VALUES, DefaultValue = 2, SortPriority = 99};
@@ -116,7 +116,7 @@ function CSQ_Run(level, twinOf)
 			if t ~= nil and t >= 0 and t ~= Idx(p) then Map.GetPlotByIndex(t):SetResourceType(r, amt or 0) end
 		end
 	end
-	local log = {cs = 0, luxOff = 0, foodOff = 0, foodOn = 0, stone = 0};
+	local log = {cs = 0, luxOff = 0, foodOff = 0, foodOn = 0};
 	-- the city states to treat: on mirror maps only one of each twin pair (the
 	-- one with the smaller plot index); its changes are copied to the twin
 	local list = {};
@@ -178,26 +178,11 @@ function CSQ_Run(level, twinOf)
 						if r ~= nil then Set(e[1], r, 1); food = food + 1; log.foodOn = log.foodOn + 1 end
 					end
 				end
-				local stone = Res("RESOURCE_STONE");
-				local has = false;
-				for _, e in ipairs(around) do if e[1]:GetResourceType(-1) == stone then has = true end end
-				if not has and stone ~= nil then
-					for _, e in ipairs(around) do
-						local p = e[1];
-						if e[2] >= 2 and not p:IsWater() and not p:IsMountain() and p:GetResourceType(-1) == -1
-							and p:GetImprovementType() == -1 and p:GetFeatureType() == FeatureTypes.NO_FEATURE
-							and (p:GetTerrainType() == TerrainTypes.TERRAIN_PLAINS or p:GetTerrainType() == TerrainTypes.TERRAIN_GRASS
-								or p:GetTerrainType() == TerrainTypes.TERRAIN_DESERT or p:GetTerrainType() == TerrainTypes.TERRAIN_TUNDRA)
-							and not NearMajor(p) then
-							Set(p, stone, 1); log.stone = log.stone + 1; break;
-						end
-					end
-				end
 			end
 		end
 	end
 	print("City states (level " .. level .. "):", log.cs, "city states, luxuries removed", log.luxOff,
-		"food removed", log.foodOff, "food added", log.foodOn, "stone added", log.stone);
+		"food removed", log.foodOff, "food added", log.foodOn);
 end
 -- <<< CITY STATE QUALITY END >>>
 ------------------------------------------------------------------------------
@@ -277,7 +262,7 @@ MirrorBase_AddLakes = AddLakes;
 ------------------------------------------------------------------------------
 function MirrorSkirmishScriptInfo()
 	return {
-		Name = "Mirror Map: Skirmish 1.3",
+		Name = "Mirror Map: Skirmish 1.4",
 		Description = "The game's Skirmish (all land) with an exact left-right mirror and a dead strip in the middle (or none). Starts, rivers, resources, ruins and city states are mirrored, one team per side. Strategic balance: every capital gets Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles.",
 		IconAtlas = "WORLDTYPE_ATLAS_2",
 		IconIndex = 0,
@@ -640,10 +625,10 @@ function GetMapScriptInfo()
 		return MirrorSkirmishScriptInfo();
 	end
 	local names = {
-		pangaea = {"Mirror Map: Pangaea 1.3", "The game's Pangaea (one continent, ocean around it), with an exact left-right mirror, one team per side. Optional strip down the middle. Strategic balance: every capital gets Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles."},
-		archipelago = {"Mirror Map: KEK Archipelago 1.3", "Our KEK Archipelago, mirrored left-right for team games. Every player starts on an island of 20-40 tiles (option, up to 30-50), with islands of every size (1-30 tiles) all over the map and clusters of smaller islands; extra hills, Fish spread evenly, more coastal luxuries and atolls. Every player also gets an own 16-tile expansion island off their coast (option), and small islands get extra Fish. Options for sizes, gaps, shapes, ocean and resources. Strategic balance: Horses, Iron (9), Coal (7) and Aluminium (3) within 3 tiles of every capital."},
-		eastwest = {"Mirror Map: East vs West 1.3", "The game's West vs East, mirrored: all land with a water channel down the middle, one team per side. At least one player of each team starts on the coast. Strategic balance: Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles of every capital."},
-		ring = {"Mirror Map: Ring 1.3", "The game's Ring, mirrored: a loop of land joining one sub-continent per player, a polar island with the city states in the middle. Teams start on the west and east halves. Strategic balance: Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles of every capital."},
+		pangaea = {"Mirror Map: Pangaea 1.4", "The game's Pangaea (one continent, ocean around it), with an exact left-right mirror, one team per side. Optional strip down the middle. Strategic balance: every capital gets Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles."},
+		archipelago = {"Mirror Map: KEK Archipelago 1.4", "Our KEK Archipelago, mirrored left-right for team games. Every player starts on an island of 20-40 tiles (option, up to 30-50), with islands of every size (1-30 tiles) all over the map and clusters of smaller islands; extra hills, Fish spread evenly, more coastal luxuries and atolls. Every player also gets an own 16-tile expansion island off their coast (option), and small islands get extra Fish. Options for sizes, gaps, shapes, ocean and resources. Strategic balance: Horses, Iron (9), Coal (7) and Aluminium (3) within 3 tiles of every capital."},
+		eastwest = {"Mirror Map: East vs West 1.4", "The game's West vs East, mirrored: all land with a water channel down the middle, one team per side. At least one player of each team starts on the coast. Strategic balance: Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles of every capital."},
+		ring = {"Mirror Map: Ring 1.4", "The game's Ring, mirrored: a loop of land joining one sub-continent per player, a polar island with the city states in the middle. Teams start on the west and east halves. Strategic balance: Horses, Iron, Coal (7) and Aluminium (3) within 3 tiles of every capital."},
 	};
 	local options = {};
 	for n, def in ipairs(MirrorVisibleOptionDefs()) do
