@@ -306,7 +306,7 @@ function GetMapScriptInfo()
 	end
 	table.insert(options, CSQ_OptionDef());	-- always last (CSQ_Level reads the last option)
 	return {
-		Name = "Mirror Map: Pangaea 1.4",
+		Name = "Mirror Map: Pangaea 1.6",
 		Description = "One big continent cut in half by a mirror line, one team per half. No divider: the halves run into each other across a wide middle. Resources spread evenly over the whole land. Wraps east-west: small islands across the ocean link the coastal starts at the back ends. Every capital gets Horses, Iron, Coal and Aluminium within 3 tiles.",
 		IconAtlas = "WORLDTYPE_ATLAS_2",
 		IconIndex = 0,

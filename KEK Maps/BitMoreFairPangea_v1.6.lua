@@ -190,11 +190,12 @@ end
 --	         (Bob Thomas)
 --	PURPOSE: The game's own Pangaea (same land, options, sizes, wrap), with
 --	         fewer hopeless starts. NOT mirrored.
---	         1. Terrain, whole map, light: about 8% of flat tundra and about 4%
---	            of flat grassland / jungle becomes hills.
+--	         1. Terrain, whole map, light: a few extra hills on tundra and non-jungle grassland.
+--	            Thin dry open plains by about 5%; thinning river systems is optional.
 --	         2. Start lifts, only for starts that fail a check (a start that
 --	            passes is not touched; luxuries are never added):
---	            - weak start: at least 2 hills within 2 tiles (ordinary starts: none added, 11-17);
+--	            - majority grassland or tundra: 2 hills within 2 tiles; jungle: 1; plains: 0.
+--	              Coastal capitals get an adjacent hill, preferably on the shoreline;
 --	            - at least 2 food bonus resources within 3 tiles (weak start: 3);
 --	            - a start whose luxuries within 2 tiles are all plantation
 --	              ("calendar") luxuries and has no food bonus within 2 tiles
@@ -203,7 +204,7 @@ end
 --	              snow or flat desert without flood plains): also up to 2 snow
 --	              tiles within 2 tiles become tundra.
 --	         0. Continent shape: a snaky continent (thin arms all over the map,
---	            big inland seas) is rolled again (option "Snaky land"); ordinary peninsulas stay.
+--	            big inland seas) is rolled again on Normal; Broader favors fuller continents.
 --	         3. Strategic Balance (the default resource setting here): every
 --	            capital gets Horses, Iron, Coal (7) and Aluminium (3) within
 --	            3 tiles.
@@ -219,24 +220,29 @@ include("FeatureGenerator");
 include("TerrainGenerator");
 
 ------------------------------------------------------------------------------
--- Continent shape: how snaky the biggest landmass may be (see FairStringiness).
+-- Continent shape: how snaky the biggest landmass may be (see FairCoastShape).
 FAIR_MAX_STRINGY = 4.5;	-- standard size (80 wide): round about 1-2, ordinary Pangaea 2.5-3.5, snaky 4.5+ (1.2: was 3.6 = too many round blobs, crowded)
 FAIR_SHAPE_TRIES = 6;	-- snaky continents rolled again at most this often
-FAIR_LAND_PERCENT = {0, 5, 7.5, 10};	-- option "Land": Normal (default) / +5% / +7.5% / +10% land tiles
+FAIR_LAND_PERCENT = {0, 5, 7.5, 10, -5, -10};	-- option "Land": Normal (default) / +5% / +7.5% / +10% / -5% / -10% land tiles
 FAIR_MOUNTAIN_CUT_PERCENT = 0;	-- (user 11-16: 0, keep the game's chains) share of mountains (inside the thickest chains) that become passes (hills)
 FAIR_CAPITAL_MOUNTAINS_MAX = 8;	-- at most this many mountains within 4 tiles of a capital
 ------------------------------------------------------------------------------
-function FairStringiness(areaID)
+local function FairCoastShape(areaID, measureFill)
 	-- Coast tiles of the continent compared with the coast of a round continent
 	-- of the same size (a hex disk of N tiles has about sqrt(12 N) coast tiles):
 	-- about 1 = round, higher = long thin arms, inland seas, many inlets.
 	local iW, iH = Map.GetGridSize();
 	local land, coast = 0, 0;
+	local columns, minY, maxY = {}, iH, -1;
 	for y = 0, iH - 1 do
 		for x = 0, iW - 1 do
 			local plot = Map.GetPlot(x, y);
 			if plot:GetArea() == areaID and not plot:IsWater() then
 				land = land + 1;
+				if measureFill then
+					columns[x] = true;
+					minY, maxY = math.min(minY, y), math.max(maxY, y);
+				end
 				for direction = 0, DirectionTypes.NUM_DIRECTION_TYPES - 1 do
 					local adj = Map.PlotDirection(x, y, direction);
 					if adj ~= nil and adj:IsWater() then
@@ -247,49 +253,75 @@ function FairStringiness(areaID)
 			end
 		end
 	end
-	return coast / math.sqrt(12 * math.max(1, land));
+	local stringiness = coast / math.sqrt(12 * math.max(1, land));
+	if not measureFill then return stringiness end
+	-- Ignore the widest gap of empty columns, even when it crosses the map seam.
+	local gap, longest = 0, 0;
+	for x = 0, 2 * iW - 1 do
+		gap = columns[x % iW] and 0 or gap + 1;
+		longest = math.max(longest, gap);
+	end
+	return stringiness, land / ((iW - longest) * (maxY - minY + 1));
 end
 ------------------------------------------------------------------------------
 function GetMapScriptInfo()
 	local world_age, temperature, rainfall, sea_level, resources = GetCoreMapOptions()
-	-- Same lists as Pangaea. Defaults (user, 11-16): 3 Billion Years, Temperate,
+	-- Same lists as Pangaea. Defaults (user, 11-16): 3 Billion Years, midway between Temperate and Cool,
 	-- Normal rainfall, Low sea level, Strategic Balance, Normal land.
 	world_age.DefaultValue = 1;
-	temperature.DefaultValue = 2;
+	temperature.Values = {temperature.Values[1], "Normal (between Temperate and Cool)",
+		temperature.Values[2], temperature.Values[3], temperature.Values[4]};
+	temperature.DefaultValue = 3;	-- 1.6: Temperate
 	rainfall.DefaultValue = 2;
 	sea_level.DefaultValue = 1;
 	resources.DefaultValue = 5;
 	local land = {
 		Name = "Land",
-		Values = {"Normal (the game's Pangaea)", "+5% land", "+7.5% land", "+10% land"},
+		Values = {"Normal (the game's Pangaea)", "+5% land", "+7.5% land", "+10% land", "-5% land", "-10% land"},
 		DefaultValue = 1,
 		SortPriority = 1,
 	};
-	local capFood = {
-		Name = "Capital food",
+	local shape = {
+		Name = "Continent shape",
 		Values = {
-			{"Game's own", "No extra food bonus at capitals: only what the game itself places."},
-			{"Extra food bonus", "A capital with few food resources gets up to 2 (weak start 3) food bonus within 3 tiles, rings 1-2 first."},
+			{"Normal", "Use the usual Pangaea shape and reroll unusually snaky continents."},
+			{"Unfiltered", "Keep the first Pangaea, even if it has long, thin arms."},
+			{"Broader", "Favor a fuller main continent with natural bays and peninsulas."},
+			{"Broader / no inland lakes", "A broad continent free of enclosed lakes and seas. Bays remain open to the ocean."},
+			{"Large inland seas", "A broad continent with a substantial enclosed sea. Its size scales with the map."},
+			{"Compact Pangaea / no lakes", "The most Pangaea-like: one round, solid main continent with few long arms, no enclosed lakes or seas."},
 		},
-		DefaultValue = 1,
-		SortPriority = 2,
-	};
-	local snaky = {
-		Name = "Snaky land",
-		Values = {
-			{"Reroll", "A snaky continent (long thin arms, big inland seas) is rolled again; ordinary peninsulas stay."},
-			{"Keep", "The continent is used as the game makes it, snaky or not."},
-		},
-		DefaultValue = 1,
+		DefaultValue = 4,
 		SortPriority = 3,
 	};
+	local rivers = {
+		Name = "Rivers",
+		Values = {
+			{"Normal", "Keep all rivers generated by this map."},
+			{"5% fewer", "Remove about one in twenty whole river systems."},
+		},
+		DefaultValue = 1,
+		SortPriority = 4,
+	};
+	local mountainCap = {
+		Name = "Mountain cap",
+		Values = {
+			{"Game's own", "Keep every mountain the map makes."},
+			{"At most 6% of land", "Extra mountains become ordinary land (flat or hills, like the rest of the map), thickest mountain blocks first; chains keep their line."},
+			{"At most 4% of land", "Extra mountains become ordinary land (flat or hills, like the rest of the map), thickest mountain blocks first; chains keep their line."},
+			{"At most 3% of land", "Extra mountains become ordinary land (flat or hills, like the rest of the map), thickest mountain blocks first; chains keep their line."},
+			{"At most 2% of land", "Extra mountains become ordinary land (flat or hills, like the rest of the map), thickest mountain blocks first; chains keep their line."},
+		},
+		DefaultValue = 2,
+		SortPriority = 5,
+	};
 	return {
-		Name = "KEK BitMoreFairPangea 1.4",
-		Description = "The game's Pangaea with fewer hopeless starts: more land (option), snaky continents rolled again (option), no mountain walls around capitals, richer tundra and grassland, weak capitals get hills (food bonuses: option), Strategic Balance adds Coal and Aluminium near every capital.",
+		Name = "KEK BitMoreFairPangea 1.6",
+		Description = "The game's Pangaea with fewer hopeless starts: less or more land (option), slightly fewer open plains, adjustable river count and continent shape, no mountain walls around capitals, richer tundra and grassland, coastal capitals get an adjacent hill; nearby hill targets depend on terrain, Strategic Balance adds Coal and Aluminium near every capital.",
 		IsAdvancedMap = false,
 		IconIndex = 0,
 		SortIndex = 2,
-		CustomOptions = {world_age, temperature, rainfall, sea_level, resources, land, capFood, snaky, CSQ_OptionDef()},
+		CustomOptions = {world_age, temperature, rainfall, sea_level, resources, land, shape, rivers, mountainCap, CSQ_OptionDef()},
 	}
 end
 ------------------------------------------------------------------------------
@@ -359,7 +391,7 @@ function PangaeaFractalWorld:GeneratePlotTypes(args)
 		water_percent = sea_level_high
 	else -- Normal Sea Level
 	end
-	-- BitMoreFair: option "Land" adds 0 / 5 / 7.5 / 10 % land tiles.
+	-- BitMoreFair: option "Land" adjusts the land target relative to this sea level.
 	local landExtra = FAIR_LAND_PERCENT[Map.GetCustomOption(6)] or 0;
 	local water_percent_normal = water_percent;
 	water_percent = 100 - (100 - water_percent) * (100 + landExtra) / 100;
@@ -416,11 +448,16 @@ function PangaeaFractalWorld:GeneratePlotTypes(args)
 	-- the result until the largest landmass occupies 84% or more of the total land.
 	local done = false;
 	local iAttempts = 0;
+	local shape = Map.GetCustomOption(7) or 1;
+	local coastLimit = FAIR_MAX_STRINGY * math.pow(self.iNumPlotsX / 80, 0.7);
+	local broader = shape >= 3;
+	local compact = shape == 6;	-- "Compact Pangaea": stricter shape test, more tries, coarse grain
+	local shapeTries = compact and 10 or (broader and 3 or FAIR_SHAPE_TRIES);
 	fair_shapeLog, fair_shapeRejects, fair_bestShape = "", 0, nil;
 	local iWaterThreshold, biggest_area, iNumTotalLandTiles, iNumBiggestAreaTiles, iBiggestID;
 	while done == false do
 		local grain_dice = Map.Rand(7, "Continental Grain roll - LUA Pangaea");
-		if grain_dice < 4 then
+		if grain_dice < 4 or compact then
 			grain_dice = 1;
 		else
 			grain_dice = 2;
@@ -462,19 +499,29 @@ function PangaeaFractalWorld:GeneratePlotTypes(args)
 			-- BitMoreFair: a snaky continent (long thin arms, a big inland sea) is
 			-- rolled again, up to FAIR_SHAPE_TRIES times; then the least snaky one
 			-- seen is used. Ordinary peninsulas pass, so maps still differ.
-			local stringy = FairStringiness(biggest_area:GetID());
+			local stringy, fill = FairCoastShape(biggest_area:GetID(), broader);
+			local score = stringy / coastLimit;
+			if broader then
+				-- Prefer land occupying at least half its bounding rectangle.
+				-- Compare at most three natural Pangaeas; never straighten the coast.
+				if compact then
+					score = math.max(stringy / (coastLimit * 0.70), 0.62 / fill);
+				else
+					score = math.max(score, 0.50 / fill);
+				end
+			end
 			fair_shapeLog = (fair_shapeLog or "") .. string.format("%.2f ", stringy);
-			if Map.GetCustomOption(8) == 2 or stringy <= FAIR_MAX_STRINGY * math.pow(self.iNumPlotsX / 80, 0.7) then	-- option 8 "Snaky land" = Keep: no reroll	-- bigger maps are naturally more ragged
+			if shape == 2 or score <= 1 then
 				done = true;
 				iBiggestID = biggest_area:GetID();
 			else
 				fair_shapeRejects = (fair_shapeRejects or 0) + 1;
-				if fair_bestShape == nil or stringy < fair_bestShape.score then
+				if fair_bestShape == nil or score < fair_bestShape.score then
 					local copy = {};
 					for i = 0, self.iNumPlotsX * self.iNumPlotsY - 1 do copy[i] = self.plotTypes[i] end
-					fair_bestShape = {score = stringy, frac = self.continentsFrac, fine = self.fairFine, threshold = iWaterThreshold, plots = copy};
+					fair_bestShape = {score = score, frac = self.continentsFrac, fine = self.fairFine, threshold = iWaterThreshold, plots = copy};
 				end
-				if fair_shapeRejects >= FAIR_SHAPE_TRIES then
+				if fair_shapeRejects >= shapeTries then
 					local b = fair_bestShape;
 					self.continentsFrac, self.fairFine, iWaterThreshold = b.frac, b.fine, b.threshold;
 					for i = 0, self.iNumPlotsX * self.iNumPlotsY - 1 do self.plotTypes[i] = b.plots[i] end
@@ -706,6 +753,30 @@ function FairFineHeights(frac, W, H, water_percent, water_percent_normal)
 	local N = W * H;
 	local raw, fine, sorted = {}, {}, {};
 	for i = 0, N - 1 do raw[i] = frac:GetHeight(i % W, math.floor(i / W)) end
+	if (Map.GetCustomOption(7) or 1) >= 3 then
+		-- Find the land-richest quarter of the world, including across the wrap.
+		local columns = {};
+		for x = 0, W - 1 do
+			local sum = 0;
+			for y = 0, H - 1 do sum = sum + raw[y * W + x] end
+			columns[x] = sum;
+		end
+		local radius, center, best = math.floor(W / 8), 0, -1;
+		for x = 0, W - 1 do
+			local sum = 0;
+			for dx = -radius, radius do sum = sum + columns[(x + dx) % W] end
+			if sum > best then center, best = x, sum end
+		end
+		-- A shallow rise under the mainland makes marginal bays likelier to join
+		-- the interior. The existing fractal still draws the coast at the land quota.
+		for i = 0, N - 1 do
+			local dx = math.abs(i % W - center);
+			dx = math.min(dx, W - dx) / (W / 2);
+			local dy = math.abs(2 * math.floor(i / W) / (H - 1) - 1);
+			local distance = (3 * math.max(dx, dy) + math.min(dx, dy)) / 4;
+			raw[i] = raw[i] + math.floor(((Map.GetCustomOption(7) == 6) and 60 or 24) * (1 - distance));
+		end
+	end
 	for i = 0, N - 1 do
 		local s = 0;
 		for _, j in ipairs(FairHexNeighbours(i, W, H)) do s = s + raw[j] end
@@ -911,6 +982,200 @@ function FairThinMountains(plotTypes, W, H)
 	print("BitMoreFairPangea: mountains -> passes", done, "of", total);
 end
 ------------------------------------------------------------------------------
+FAIR_MOUNTAIN_CAP_PERCENT = {nil, 6, 4, 3, 2};	-- option "Mountain cap": share of land tiles that may be mountains
+function FairMountainCap()
+	-- Too many mountains: the extra ones become hills, the ones with the most
+	-- mountain neighbours first (thick blocks), so chains stay lines.
+	local cap = FAIR_MOUNTAIN_CAP_PERCENT[Map.GetCustomOption(9) or 1];
+	fair_mountainCapCut = 0;	-- GLOBAL, for logs and tests
+	if cap == nil then return end
+	local W, H = Map.GetGridSize();
+	local land, list, hills, flat = 0, {}, 0, 0;
+	local function Count(i)
+		local n = 0;
+		for _, j in ipairs(FairHexNeighbours(i, W, H)) do
+			if Map.GetPlotByIndex(j):IsMountain() then n = n + 1 end
+		end
+		return n;
+	end
+	for i = 0, W * H - 1 do
+		local p = Map.GetPlotByIndex(i);
+		if not p:IsWater() then land = land + 1 end
+		if p:IsMountain() then list[#list + 1] = i end
+		if p:IsHills() then hills = hills + 1 elseif not p:IsWater() and not p:IsMountain() then flat = flat + 1 end
+	end
+	-- a removed mountain becomes ordinary land: hills as often as the map's own land has hills
+	local hillPermille = math.floor(1000 * hills / math.max(1, hills + flat));
+	local extra = #list - math.floor(land * cap / 100 + 0.5);
+	print("BitMoreFairPangea: mountain cap", cap, "% mountains", #list, "land", land);
+	while extra > 0 and #list > 0 do
+		local best, bestN, bestR = nil, -1, 0;
+		for k, i in ipairs(list) do
+			local n = Count(i);
+			if n > bestN then best, bestN = k, n end
+		end
+		-- among the ties take a random one (the map's dice, same on every PC)
+		local ties = {};
+		for k, i in ipairs(list) do if Count(i) == bestN then ties[#ties + 1] = k end end
+		best = ties[1 + Map.Rand(#ties, "BitMoreFairPangea - mountain cap")];
+		local i = list[best];
+		local hill = Map.Rand(1000, "BitMoreFairPangea - mountain cap land") < hillPermille;
+		Map.GetPlotByIndex(i):SetPlotType(hill and PlotTypes.PLOT_HILLS or PlotTypes.PLOT_LAND, false, false);
+		table.remove(list, best);
+		extra = extra - 1;
+		fair_mountainCapCut = fair_mountainCapCut + 1;
+	end
+	print("BitMoreFairPangea: mountains -> hills (cap)", fair_mountainCapCut);
+end
+------------------------------------------------------------------------------
+-- Work on the actual installed hex grid after the stock plot-index conversions.
+-- Polar waters and the largest ocean are exterior, including across the x seam.
+local function FairWaterComponents(tiles, value, neighbors)
+	local seen, groups = {}, {};
+	for i = 0, #neighbors do
+		if tiles[i] == value and not seen[i] then
+			local group = {i};
+			seen[i] = true;
+			for _, j in ipairs(group) do
+				for _, k in ipairs(neighbors[j]) do
+					if tiles[k] == value and not seen[k] then
+						seen[k] = true;
+						group[#group + 1] = k;
+					end
+				end
+			end
+			groups[#groups + 1] = group;
+		end
+	end
+	return groups;
+end
+
+local function FairInlandWaters(shape)
+	local W, H = Map.GetGridSize();
+	local N = W * H;
+	local water, neighbors, land = {}, {}, 0;
+	for i = 0, N - 1 do
+		water[i] = Map.GetPlotByIndex(i):IsWater();
+		if not water[i] then land = land + 1 end
+		neighbors[i] = FairHexNeighbours(i, W, H);
+	end
+	local bodies = FairWaterComponents(water, true, neighbors);
+	local ocean;
+	for _, body in ipairs(bodies) do
+		if not ocean or #body > #ocean then ocean = body end
+	end
+	local exterior, enclosed, biggestSea = {}, {}, 0;
+	for _, body in ipairs(bodies) do
+		local outside = body == ocean;
+		for _, i in ipairs(body) do
+			if i < W or i >= N - W then outside = true; break end
+		end
+		if outside then
+			for _, i in ipairs(body) do exterior[i] = true end
+		else
+			biggestSea = math.max(biggestSea, #body);
+			for _, i in ipairs(body) do enclosed[#enclosed + 1] = i end
+		end
+	end
+	local target = math.max(12, math.floor(land * 0.03 + 0.5));
+	if shape == 5 and biggestSea >= target then return end
+
+	-- Fill enclosed basins first. For the sea preset, find a basin with a
+	-- continuous land rim, far enough from both the ocean and the polar edges.
+	local delta = #enclosed;
+	for _, i in ipairs(enclosed) do water[i] = false end
+	if shape == 5 then
+		local distance, queue, core = {}, {}, {};
+		for i = 0, N - 1 do
+			if exterior[i] or i < W or i >= N-W then
+				distance[i] = 0;
+				queue[#queue + 1] = i;
+			end
+		end
+		for _, i in ipairs(queue) do
+			for _, j in ipairs(neighbors[i]) do
+				if distance[j] == nil then
+					distance[j] = distance[i] + 1;
+					queue[#queue + 1] = j;
+				end
+			end
+		end
+		local basin;
+		for buffer = 3, 2, -1 do
+			for i = 0, N - 1 do core[i] = distance[i] >= buffer end
+			basin = nil;
+			for _, region in ipairs(FairWaterComponents(core, true, neighbors)) do
+				if not basin or #region > #basin then basin = region end
+			end
+			if basin and #basin >= target then break end
+		end
+		if basin then
+			local center = basin[1];
+			for _, i in ipairs(basin) do
+				if distance[i] > distance[center] then center = i end
+			end
+			local sea, visited = {center}, {[center] = true};
+			for _, i in ipairs(sea) do
+				if #sea >= target then break end
+				for _, j in ipairs(FairShuffled(neighbors[i])) do
+					if core[j] and not visited[j] then
+						visited[j] = true;
+						sea[#sea + 1] = j;
+						if #sea >= target then break end
+					end
+				end
+			end
+			for _, i in ipairs(sea) do water[i] = true end
+			delta = delta - #sea;
+		end
+	end
+
+	-- Offset the change on the ocean shore. A single consecutive arc of wet
+	-- neighbors keeps channels open, land bridges intact and the sea enclosed.
+	while delta ~= 0 do
+		local previous = delta;
+		local coast = {};
+		for i = W, N - W - 1 do
+			local wet = 0;
+			for _, j in ipairs(neighbors[i]) do if exterior[j] then wet = wet + 1 end end
+			if wet > 0 and wet < 6 then coast[#coast + 1] = i end
+		end
+		for _, i in ipairs(FairShuffled(coast)) do
+			if delta == 0 then break end
+			local erode = delta > 0;
+			if (erode and not water[i]) or (not erode and exterior[i]) then
+				local transitions, inlandNeighbor = 0, false;
+				for d, j in ipairs(neighbors[i]) do
+					local k = neighbors[i][d % 6 + 1];
+					if water[j] ~= water[k] then transitions = transitions + 1 end
+					if water[j] and not exterior[j] then inlandNeighbor = true end
+				end
+				if transitions == 2 and not inlandNeighbor then
+					water[i], exterior[i] = erode, erode;
+					delta = delta + (erode and -1 or 1);
+				end
+			end
+		end
+		if delta == previous then break end
+	end
+	for i = 0, N - 1 do
+		local p = Map.GetPlotByIndex(i);
+		if p:IsWater() ~= water[i] then
+			p:SetPlotType(water[i] and PlotTypes.PLOT_OCEAN or PlotTypes.PLOT_LAND, false, false);
+		end
+	end
+	Map.RecalculateAreas();
+end
+
+function FairNoLakes()
+	local shape = Map.GetCustomOption(7);
+	return shape == 4 or shape == 6;
+end
+local FairGameAddLakes = AddLakes;
+function AddLakes()
+	if not FairNoLakes() then FairGameAddLakes() end
+end
+
 function GeneratePlotTypes()
 	-- Plot generation customized to ensure enough land belongs to the Pangaea.
 	print("Generating Plot Types (Lua Pangaea) ...");
@@ -919,19 +1184,122 @@ function GeneratePlotTypes()
 	local plotTypes = fractal_world:GeneratePlotTypes();
 	
 	SetPlotTypes(plotTypes);
+	local shape = Map.GetCustomOption(7);
+	if shape == 4 or shape == 6 then FairInlandWaters(4) elseif shape == 5 then FairInlandWaters(5) end
+	FairMountainCap();
 	GenerateCoasts();
 end
 ------------------------------------------------------------------------------
+-- Remove a random sample without replacement. All clients use the map RNG.
+local function FairTakeSample(items, target, visit)
+	local n = math.floor(target);
+	if Map.Rand(100, "Fair sample rounding") < (target - n) * 100 then n = n + 1 end
+	n = math.min(n, #items);
+	for i = 1, n do
+		local pick = i + Map.Rand(#items - i + 1, "Fair sample");
+		items[i], items[pick] = items[pick], items[i];
+		visit(items[i]);
+	end
+	return n;
+end
+
+local function FairReduceOpenPlains()
+	local candidates, open = {}, 0;
+	local W, H = Map.GetGridSize();
+	for i = 0, W * H - 1 do
+		local p = Map.GetPlotByIndex(i);
+		if p:GetPlotType() == PlotTypes.PLOT_LAND and p:GetTerrainType() == TerrainTypes.TERRAIN_PLAINS
+			and p:GetFeatureType() == FeatureTypes.NO_FEATURE then
+			open = open + 1;
+			if not p:IsFreshWater() then
+				local desert, tundra = 0, 0;
+				for _, j in ipairs(FairHexNeighbours(i, W, H)) do
+					local terrain = Map.GetPlotByIndex(j):GetTerrainType();
+					if terrain == TerrainTypes.TERRAIN_DESERT then desert = desert + 1 end
+					if terrain == TerrainTypes.TERRAIN_TUNDRA then tundra = tundra + 1 end
+				end
+				if desert + tundra > 0 then
+					candidates[#candidates + 1] = {p, desert > tundra and TerrainTypes.TERRAIN_DESERT or TerrainTypes.TERRAIN_TUNDRA};
+				end
+			end
+		end
+	end
+	local removed = FairTakeSample(candidates, open * 0.05, function(entry)
+		entry[1]:SetTerrainType(entry[2], false, true);
+	end);
+	print("BitMoreFairPangea: open plains, converted", open, removed);
+end
+
+-- An edge joins two hex corners. Group edges sharing a corner before sampling
+-- so a river and its tributaries are either kept intact or removed together.
+local function FairReduceRivers()
+	local W, H = Map.GetGridSize();
+	local endsAt, edges = {}, {};
+	local function corner(x, y)
+		return (y + 2) * (2 * W) + x % (2 * W);
+	end
+	local function add(p, setter, a, b)
+		local edge = {plot = p, clear = setter, a = a, b = b};
+		edges[#edges + 1] = edge;
+		for _, key in ipairs({a, b}) do
+			endsAt[key] = endsAt[key] or {};
+			table.insert(endsAt[key], edge);
+		end
+	end
+	for i = 0, W * H - 1 do
+		local p = Map.GetPlotByIndex(i);
+		local x, y = 2 * p:GetX() + p:GetY() % 2, 3 * p:GetY();
+		local se, south, sw = corner(x + 1, y - 1), corner(x, y - 2), corner(x - 1, y - 1);
+		if p:IsWOfRiver() then add(p, p.SetWOfRiver, corner(x + 1, y + 1), se) end
+		if p:IsNWOfRiver() then add(p, p.SetNWOfRiver, se, south) end
+		if p:IsNEOfRiver() then add(p, p.SetNEOfRiver, south, sw) end
+	end
+	local systems = {};
+	for _, first in ipairs(edges) do
+		if not first.seen then
+			local system = {first};
+			systems[#systems + 1] = system;
+			first.seen = true;
+			for _, edge in ipairs(system) do
+				for _, key in ipairs({edge.a, edge.b}) do
+					for _, neighbor in ipairs(endsAt[key]) do
+						if not neighbor.seen then
+							neighbor.seen = true;
+							system[#system + 1] = neighbor;
+						end
+					end
+				end
+			end
+		end
+	end
+	local removed = FairTakeSample(systems, #systems * 0.05, function(system)
+		for _, edge in ipairs(system) do
+			local p = edge.plot;
+			edge.clear(p, false, FlowDirectionTypes.NO_FLOWDIRECTION);
+			if not (p:IsWOfRiver() or p:IsNWOfRiver() or p:IsNEOfRiver()) then _rivers[p] = nil end
+		end
+	end);
+	print("BitMoreFairPangea: river systems, removed", #systems, removed);
+end
+
 function GenerateTerrain()
 	
 	-- Get Temperature setting input by user.
 	local temp = Map.GetCustomOption(2)
-	if temp == 4 then
-		temp = 1 + Map.Rand(3, "Random Temperature - Lua");
+	if temp == 5 then
+		temp = 1 + Map.Rand(4, "Random Temperature - Lua");
 	end
 
 	-- BitMoreFair (user, 11-16): a wider tundra band (the game: from 0.6), snow as the game has it.
-	local args = {temperature = temp, fTundraLatitude = FAIR_TUNDRA_LATITUDE};
+	local gameTemperature = ({1, 2, 2, 3})[temp] or 2;
+	local args = {temperature = gameTemperature, fTundraLatitude = FAIR_TUNDRA_LATITUDE};
+	-- Use half the game's Cool adjustments for the new Normal. Temperate
+	-- and Cool share a snow line; the generator moves the tundra and warm bands.
+	if temp == 2 then
+		args.temperature = 1;
+		args.temperature_shift = 0.05;
+		args.desert_shift = 8;
+	end
 	local terraingen = TerrainGenerator.Create(args);
 
 	terrainTypes = terraingen:GenerateTerrain();
@@ -967,7 +1335,8 @@ function AddFeatures()
 
 	-- BitMoreFairPangea: a few more hills, mostly in the tundra; tundra lakes.
 	FairTerrainTweak();
-	FairTundraLakes();
+	if not FairNoLakes() then FairTundraLakes() end
+	FairReduceOpenPlains();
 end
 ------------------------------------------------------------------------------
 FAIR_TUNDRA_LATITUDE = 0.55;	-- tundra starts at this latitude (the game: 0.6)
@@ -992,6 +1361,7 @@ function AddRivers()
 			end
 		end
 	end
+	if Map.GetCustomOption(8) == 2 then FairReduceRivers() end
 	fair_tundraRivers = made;	-- GLOBAL, for logs and tests
 	print("BitMoreFairPangea: extra tundra rivers", made);
 end
@@ -1024,6 +1394,179 @@ function FairTundraLakes()
 	print("BitMoreFairPangea: tundra lakes", made);
 end
 ------------------------------------------------------------------------------
+-- Region IDs and terrain-count columns are the BNW starting-plot database's.
+local FairBiasColumn = {14, 17, 16, 13, 5, 12, 11};
+local function FairBiasTiles(x, y)
+	local counts = {0, 0, 0, 0, 0, 0, 0};
+	for _, p in ipairs(FairPlotsInRings(x, y, 1, 2)) do
+		if not p:IsWater() and not p:IsMountain() then
+			local terrain, feature = p:GetTerrainType(), p:GetFeatureType();
+			if terrain == TerrainTypes.TERRAIN_TUNDRA then counts[1] = counts[1] + 1 end
+			if feature == FeatureTypes.FEATURE_JUNGLE then counts[2] = counts[2] + 1 end
+			if feature == FeatureTypes.FEATURE_FOREST then counts[3] = counts[3] + 1 end
+			if terrain == TerrainTypes.TERRAIN_DESERT then counts[4] = counts[4] + 1 end
+			if p:IsHills() then counts[5] = counts[5] + 1 end
+			if terrain == TerrainTypes.TERRAIN_PLAINS then counts[6] = counts[6] + 1 end
+			if terrain == TerrainTypes.TERRAIN_GRASS then counts[7] = counts[7] + 1 end
+		end
+	end
+	return counts;
+end
+
+local function FairLobbyBiases(asp)
+	if Game.GetCustomOption("GAMEOPTION_DISABLE_START_BIAS") == 1 then return {} end
+	local biases = {};
+	for _, id in ipairs(asp.player_ID_list) do
+		local player = Players[id];
+		local civ = GameInfo.Civilizations[player:GetCivilizationType()].Type;
+		biases[#biases+1] = {id=id, team=player:GetTeam(), coast=CivNeedsCoastalStart(civ),
+			river=CivNeedsRiverStart(civ), prefer=GetStartRegionPriorityListForCiv_GetIDs(civ),
+			avoid=GetStartRegionAvoidListForCiv_GetIDs(civ)};
+	end
+	return biases;
+end
+
+-- Reserve coastal sites before the game starts placing its spacing and resource
+-- buffers. Favor regions with plenty of shore and let inland civs retain scarce biomes.
+local function FairChooseMajorStarts(asp, biases)
+	if #biases == 0 then return asp:ChooseLocations() end
+	local shores, preferred = 0, {};
+	for _, bias in ipairs(biases) do
+		if bias.coast then shores = shores + 1 end
+		for _, kind in ipairs(bias.prefer) do preferred[kind] = true end
+	end
+	local targets, pending = {}, {};
+	local findNormal, evaluate = asp.FindStart, asp.EvaluateCandidatePlot;
+	local W = Map.GetGridSize();
+	for i = 1, asp.iNumCivs do pending[i] = true end
+
+	-- Pick distinct regions with the best supply of each requested biome. The
+	-- site's normal fertility and spacing checks still decide which tiles qualify.
+	local function plan()
+		local ranked = {};
+		for i, counts in ipairs(asp.regionTerrainCounts) do
+			if counts[22] >= 3 then ranked[#ranked+1] = i end
+		end
+		table.sort(ranked, function(a,b)
+			local pa, pb = preferred[asp.regionTypes[a]], preferred[asp.regionTypes[b]];
+			if pa ~= pb then return not pa end
+			local ca, cb = asp.regionTerrainCounts[a][22], asp.regionTerrainCounts[b][22];
+			if ca ~= cb then return ca > cb end
+			return a < b;
+		end);
+		for i = 1, math.min(shores,#ranked) do targets[ranked[i]] = "coast" end
+		for _, bias in ipairs(biases) do
+			if not bias.coast then
+				local best, kind, score = nil, nil, 0;
+				for i, counts in ipairs(asp.regionTerrainCounts) do
+					if not targets[i] then
+						for _, k in ipairs(bias.prefer) do
+							local column = FairBiasColumn[k];
+							if column and counts[column] > 0 then
+								local fit = counts[column] / math.max(1, counts[2]);
+								if asp.regionTypes[i] == k then fit = fit + 1 end
+								if fit > score then best, kind, score = i, k, fit end
+							end
+						end
+					end
+				end
+				if best then targets[best] = kind end
+			end
+		end
+	end
+
+	local planned = false;
+	local function choose(self, region)
+		if not planned then plan(); planned = true end
+		pending[region] = nil;
+		local reserved = 0;
+		for i = 1, self.iNumCivs do
+			if pending[i] and targets[i] == "coast" then reserved = reserved + 1 end
+		end
+		local wantCoast = shores > 0 and self.regionTerrainCounts[region][22] >= 3
+			and (targets[region] == "coast" or reserved < shores);
+		local kind = targets[region];
+		if type(kind) == "number" and not wantCoast then
+			self.EvaluateCandidatePlot = function(db, index, regionType)
+				local score, eligible = evaluate(db, index, regionType);
+				local x, y = (index-1) % W, math.floor((index-1)/W);
+				local n = FairBiasTiles(x,y)[kind];
+				return score + 4 * math.min(3,n), eligible;
+			end
+		end
+		-- The native coastal finder can itself fall back to FindStart.
+		self.FindStart = findNormal;
+		local find = wantCoast and self.FindCoastalStart or findNormal;
+		local success, forced = find(self, region);
+		self.FindStart, self.EvaluateCandidatePlot = choose, evaluate;
+		local start = self.startingPlots[region];
+		if start and self.plotDataIsCoastal[start[2]*W+start[1]+1] then
+			shores = math.max(0, shores-1);
+		end
+		return success, forced;
+	end
+	asp.FindStart = choose;
+	asp:ChooseLocations();
+	asp.FindStart = findNormal;
+	if shores > 0 then print("BitMoreFairPangea: coastal seats unavailable", shores) end
+end
+
+-- Resolve mismatches between the region label and the capital's actual tiles.
+-- An exchange must improve one civ without worsening the other's bias. Keep team
+-- locations and all normalized starting sites. Stop rewarding terrain at three tiles.
+local function FairRefineBiasAssignment(asp, biases)
+	if #biases == 0 then return end
+	local sites, scores, assigned = {}, {}, {};
+	for i, start in ipairs(asp.startingPlots) do
+		local x,y = start[1],start[2];
+		sites[i] = {plot=Map.GetPlot(x,y), coast=AdjacentToSaltWater(x,y), tiles=FairBiasTiles(x,y)};
+	end
+	for i, bias in ipairs(biases) do
+		scores[i] = {};
+		local current = Players[bias.id]:GetStartingPlot();
+		for j, site in ipairs(sites) do
+			local plot, value = site.plot, 0;
+			if plot:GetX()==current:GetX() and plot:GetY()==current:GetY() then assigned[i]=j end
+			if bias.coast then value = site.coast and 100 or 0
+			elseif bias.river then value = plot:IsRiver() and 100 or 0
+			elseif #bias.prefer > 0 then
+				for _, k in ipairs(bias.prefer) do
+					local n = math.min(3,site.tiles[k] or 0);
+					value = math.max(value, 3*n + (asp.regionTypes[j]==k and 2 or 0));
+				end
+			else
+				for _, k in ipairs(bias.avoid) do
+					value = value - math.min(3,site.tiles[k] or 0) - (asp.regionTypes[j]==k and 4 or 0);
+				end
+			end
+			scores[i][j] = value;
+		end
+		if not assigned[i] then return end
+	end
+	local changed;
+	repeat
+		changed = false;
+		for i = 1,#biases-1 do
+			for j = i+1,#biases do
+				if not asp.bTeamGame or biases[i].team==biases[j].team then
+					local a,b = assigned[i],assigned[j];
+					local da = scores[i][b]-scores[i][a];
+					local db = scores[j][a]-scores[j][b];
+					if da>=0 and db>=0 and da+db>0 then
+						assigned[i],assigned[j] = b,a;
+						changed = true;
+					end
+				end
+			end
+		end
+	until not changed
+	for i,bias in ipairs(biases) do
+		local player,plot = Players[bias.id],sites[assigned[i]].plot;
+		local current = player:GetStartingPlot();
+		if current:GetX()~=plot:GetX() or current:GetY()~=plot:GetY() then player:SetStartingPlot(plot) end
+	end
+end
+
 function StartPlotSystem()
 	-- Get Resources setting input by user.
 	local res = Map.GetCustomOption(5)
@@ -1044,10 +1587,12 @@ function StartPlotSystem()
 	start_plot_database:GenerateRegions(args)
 
 	print("Choosing start locations for civilizations.");
-	start_plot_database:ChooseLocations()
+	local biases = FairLobbyBiases(start_plot_database);
+	FairChooseMajorStarts(start_plot_database, biases);
 	
 	print("Normalizing start locations and assigning them to Players.");
 	start_plot_database:BalanceAndAssign()
+	FairRefineBiasAssignment(start_plot_database, biases);
 
 	print("Placing Natural Wonders.");
 	start_plot_database:PlaceNaturalWonders()
@@ -1400,10 +1945,13 @@ fair_startPlotDatabase = nil;	-- GLOBAL the AssignStartingPlots instance
 fair_liftLog = {};				-- GLOBAL what the start lifts did, one entry per major start
 fair_tweakCounts = nil;			-- GLOBAL what the terrain tweak did
 
-FAIR_TUNDRA_HILLS_PERCENT = 5;	-- share of flat tundra that becomes hills (user 11-16: hillier tundra; 11-17 toned down from 15)
+FAIR_TUNDRA_HILLS_PERCENT = 6.5;	-- trial 6: user "tundra a tiny bit more hills and forest" (was 5)
+--	-- share of flat tundra that becomes hills (user 11-16: hillier tundra; 11-17 toned down from 15)
 FAIR_TUNDRA_SHEEP_PERCENT = 8;	-- share of free bare tundra hills that get Sheep (none next to another Sheep)
-FAIR_TUNDRA_EMPTY_FOREST_PERCENT = 15;	-- 11-17: toned down from 45	-- empty flat tundra (nothing on it or next to it): forest
-FAIR_TUNDRA_FOREST_PERCENT = 6;	-- 11-17: toned down from 20; share of bare tundra (flat or hills) that gets a forest
+FAIR_TUNDRA_EMPTY_FOREST_PERCENT = 20;	-- trial 6: was 15
+--	-- 11-17: toned down from 45	-- empty flat tundra (nothing on it or next to it): forest
+FAIR_TUNDRA_FOREST_PERCENT = 8;	-- trial 6: was 6
+--	-- 11-17: toned down from 20; share of bare tundra (flat or hills) that gets a forest
 FAIR_TUNDRA_DEER_PERCENT = 5;	-- 11-17 "land about 10% worse": extras trimmed (hills 8->5, sheep 15->8, forest 10->6/25->15, deer 8->5, grass hills 1.5->0.5, cattle 12->4)	-- share of free tundra tiles that get Deer (none next to another Deer)
 FAIR_GREEN_HILLS_PERCENT = 0.5;	-- share of flat grassland that becomes hills (1.2: grassland only, no jungle; user 11-16: halved from 3)
 FAIR_GRASS_CATTLE_PERCENT = 4;	-- empty flat grassland (nothing on it or next to it, no river): Cattle
@@ -1513,7 +2061,14 @@ function FairNextToResource(plot, resID)
 	return false
 end
 ------------------------------------------------------------------------------
+function FairExtraResources()
+	-- option "Extra resources": Trimmed = the 11-17 trim (default); Full = the values before it.
+	if true then	-- 1.6: always the full extras (option removed)
+		FAIR_TUNDRA_SHEEP_PERCENT, FAIR_TUNDRA_DEER_PERCENT, FAIR_GRASS_CATTLE_PERCENT = 15, 8, 12;
+	end
+end
 function FairTerrainTweak()
+	FairExtraResources();
 	-- Runs after terrain and features exist, before starts are chosen (so the
 	-- start finder already sees the new hills). Only flat land changes; a forest
 	-- or jungle on the tile stays. Never flood plains, oasis, marsh, ice, a natural
@@ -1623,6 +2178,26 @@ function FairIsSparse(plot)
 	return false
 end
 ------------------------------------------------------------------------------
+-- Class jungle by its visible feature, so the plains underneath do not
+-- turn a jungle capital into a plains capital. Count workable land in rings 1-2.
+local function FairStartTerrain(x, y)
+	local land, counts = 0, {plains = 0, grassland = 0, tundra = 0, jungle = 0};
+	for _, plot in ipairs(FairPlotsInRings(x, y, 1, 2)) do
+		if not plot:IsWater() and not plot:IsMountain() then
+			land = land + 1;
+			local t = plot:GetTerrainType();
+			if plot:GetFeatureType() == FeatureTypes.FEATURE_JUNGLE then counts.jungle = counts.jungle + 1
+			elseif t == TerrainTypes.TERRAIN_PLAINS then counts.plains = counts.plains + 1
+			elseif t == TerrainTypes.TERRAIN_GRASS then counts.grassland = counts.grassland + 1
+			elseif t == TerrainTypes.TERRAIN_TUNDRA then counts.tundra = counts.tundra + 1 end
+		end
+	end
+	for _, kind in ipairs({"plains", "grassland", "tundra", "jungle"}) do
+		if counts[kind] * 2 > land then return kind end
+	end
+	return "mixed";
+end
+
 function FairMeasureStart(x, y)
 	-- Everything the lifts look at, around (x, y). Rings 1-2 / 1-3, the city tile
 	-- itself does not count.
@@ -1759,6 +2334,58 @@ function FairCapitalMountains(x, y)
 	return extra;
 end
 ------------------------------------------------------------------------------
+-- Coastal capitals need production in the first ring. Prefer a hill on the
+-- shoreline, then any adjacent land hill if the shoreline cannot take one.
+local function FairCoastalHill(x, y)
+	if not Map.GetPlot(x, y):IsCoastalLand() then return false end
+	local ring = FairPlotsInRings(x, y, 1, 1);
+	for _, shoreOnly in ipairs({true, false}) do
+		local candidates, bestRank = {}, 99;
+		for _, plot in ipairs(ring) do
+			if not shoreOnly or plot:IsCoastalLand() then
+				if plot:GetPlotType() == PlotTypes.PLOT_HILLS then return false end
+				local rank = FairHillRank(plot);
+				if rank and rank <= bestRank then
+					if rank < bestRank then candidates, bestRank = {}, rank end
+					candidates[#candidates + 1] = plot;
+				end
+			end
+		end
+		if #candidates > 0 then
+			local p = candidates[1 + Map.Rand(#candidates, "Fair coastal hill")];
+			p:SetPlotType(PlotTypes.PLOT_HILLS, false, true);
+			return true;
+		end
+	end
+	return false;
+end
+
+local FairHillFloor = {plains = 0, jungle = 1, grassland = 2, tundra = 2};
+
+-- BNW can also force a first-ring hill during its early production check.
+-- Skip just that placement on majority-plains starts; keep other normalization.
+local FairGameNormalizeStart = AssignStartingPlots.NormalizeStartLocation;
+function AssignStartingPlots:NormalizeStartLocation(region)
+	local start = self.startingPlots[region];
+	local x, y = start[1], start[2];
+	local kind = FairStartTerrain(x, y);
+	-- Reserve the minimum before luxuries, strategics or food occupy the last legal tile.
+	FairCoastalHill(x, y);
+	local target = FairHillFloor[kind] or 0;
+	local hills = FairMeasureStart(x, y).hills;
+	while hills < target do
+		if not FairAddHill(x, y) then break end
+		hills = hills + 1;
+	end
+	if kind ~= "plains" then
+		return FairGameNormalizeStart(self, region);
+	end
+	local placeHill = self.AttemptToPlaceHillsAtPlot;
+	self.AttemptToPlaceHillsAtPlot = function() return false end;
+	FairGameNormalizeStart(self, region);
+	self.AttemptToPlaceHillsAtPlot = placeHill;
+end
+
 function FairLiftStart(asp, region_number)
 	local data = asp.startingPlots[region_number];
 	if data == nil then return end
@@ -1767,7 +2394,9 @@ function FairLiftStart(asp, region_number)
 	local log = {region = region_number, x = x, y = y, weak = m.weak, land = m.land, sparse = m.sparse,
 		hillsBefore = m.hills, bonusBefore = m.bonus3, calendar = m.calendar,
 		snow = 0, hills = 0, bonus = 0, calendarBonus = 0};
-	local hillsWanted = m.weak and 2 or 0;	-- user 11-17: no hill lift for ordinary starts
+	local kind = FairStartTerrain(x, y);
+	local hillsWanted = FairHillFloor[kind] or (m.weak and 2 or 0);
+	log.terrain = kind;
 	local bonusWanted = m.weak and 3 or 2;
 
 	-- Hopeless start (user, 11-16: the floor, not a rewrite): weak, no fresh water
@@ -1778,7 +2407,8 @@ function FairLiftStart(asp, region_number)
 	log.hopeless = m.weak and not capital:IsFreshWater() and m.hills <= 1;
 	log.plains = 0;
 	if log.hopeless then
-		hillsWanted, bonusWanted = 3, 4;
+		if kind == "mixed" then hillsWanted = 3 end
+		bonusWanted = 4;
 		for ring = 1, 2 do
 			local list = {};
 			for loop, plot in ipairs(FairPlotsInRings(x, y, ring, ring)) do
@@ -1850,6 +2480,8 @@ function FairLiftStart(asp, region_number)
 	log.mountainsCut = FairCapitalMountains(x, y);
 
 	-- Hills within 2 tiles.
+	if FairCoastalHill(x, y) then log.hills = log.hills + 1 end
+	log.hillsWanted = hillsWanted;
 	local hills = FairMeasureStart(x, y).hills;
 	while hills < hillsWanted do
 		if not FairAddHill(x, y) then break end
@@ -1859,7 +2491,7 @@ function FairLiftStart(asp, region_number)
 
 	-- Food bonus within 3 tiles (rings 1-2 first). Only with the "Capital food"
 	-- option on "Extra food bonus" (user, 11-17: off by default).
-	local foodOn = (Map.GetCustomOption(7) == 2);
+	local foodOn = false;	-- 1.6: always the game's own capital food (option removed)
 	local bonus = m.bonus3;
 	local bonus2 = m.bonus2;
 	while foodOn and bonus < bonusWanted do
