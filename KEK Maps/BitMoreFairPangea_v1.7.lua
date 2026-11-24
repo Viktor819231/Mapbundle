@@ -278,7 +278,7 @@ function GetMapScriptInfo()
 	local land = {
 		Name = "Land",
 		Values = {"Normal (the game's Pangaea)", "+5% land", "+7.5% land", "+10% land", "-5% land", "-10% land"},
-		DefaultValue = 1,
+		DefaultValue = 5,	-- 1.7: -5% land
 		SortPriority = 1,
 	};
 	local shape = {
@@ -304,24 +304,32 @@ function GetMapScriptInfo()
 		SortPriority = 4,
 	};
 	local mountainCap = {
-		Name = "Mountain cap",
+		Name = "Mountain clumps",
 		Values = {
 			{"Game's own", "Keep every mountain the map makes."},
-			{"At most 6% of land", "Extra mountains become ordinary land (flat or hills, like the rest of the map), thickest mountain blocks first; chains keep their line."},
-			{"At most 4% of land", "Extra mountains become ordinary land (flat or hills, like the rest of the map), thickest mountain blocks first; chains keep their line."},
-			{"At most 3% of land", "Extra mountains become ordinary land (flat or hills, like the rest of the map), thickest mountain blocks first; chains keep their line."},
-			{"At most 2% of land", "Extra mountains become ordinary land (flat or hills, like the rest of the map), thickest mountain blocks first; chains keep their line."},
+			{"Thinner clumps", "Break up thick mountain blocks: no mountain keeps more than 3 mountain neighbours. Chains stay."},
+			{"No clumps", "Mountains only as chains and single peaks: no mountain keeps more than 2 mountain neighbours."},
 		},
-		DefaultValue = 2,
+		DefaultValue = 2,	-- 1.7: Thinner clumps
 		SortPriority = 5,
 	};
+	local forests = {
+		Name = "Forest and jungle",
+		Values = {
+			{"Game's own", "As many forests and jungles as the map makes."},
+			{"5% fewer", "5% of forest and jungle tiles removed, from the thickest woods first."},
+			{"10% fewer", "10% of forest and jungle tiles removed, from the thickest woods first."},
+		},
+		DefaultValue = 1,
+		SortPriority = 6,
+	};
 	return {
-		Name = "KEK BitMoreFairPangea 1.6",
+		Name = "KEK BitMoreFairPangea 1.7",
 		Description = "The game's Pangaea with fewer hopeless starts: less or more land (option), slightly fewer open plains, adjustable river count and continent shape, no mountain walls around capitals, richer tundra and grassland, coastal capitals get an adjacent hill; nearby hill targets depend on terrain, Strategic Balance adds Coal and Aluminium near every capital.",
 		IsAdvancedMap = false,
 		IconIndex = 0,
 		SortIndex = 2,
-		CustomOptions = {world_age, temperature, rainfall, sea_level, resources, land, shape, rivers, mountainCap, CSQ_OptionDef()},
+		CustomOptions = {world_age, temperature, rainfall, sea_level, resources, land, shape, rivers, mountainCap, forests, CSQ_OptionDef()},
 	}
 end
 ------------------------------------------------------------------------------
@@ -982,15 +990,16 @@ function FairThinMountains(plotTypes, W, H)
 	print("BitMoreFairPangea: mountains -> passes", done, "of", total);
 end
 ------------------------------------------------------------------------------
-FAIR_MOUNTAIN_CAP_PERCENT = {nil, 6, 4, 3, 2};	-- option "Mountain cap": share of land tiles that may be mountains
+FAIR_CLUMP_MAX_NEIGHBOURS = {nil, 3, 2};	-- option "Mountain clumps": most mountain neighbours a mountain may keep
 function FairMountainCap()
-	-- Too many mountains: the extra ones become hills, the ones with the most
-	-- mountain neighbours first (thick blocks), so chains stay lines.
-	local cap = FAIR_MOUNTAIN_CAP_PERCENT[Map.GetCustomOption(9) or 1];
+	-- Break up clumps, keep chains: while a mountain has more mountain neighbours
+	-- than allowed, the one with the most becomes ordinary land (flat or hills, at
+	-- the map's own hill share). A chain (2 neighbours each) is never touched.
+	local maxN = FAIR_CLUMP_MAX_NEIGHBOURS[Map.GetCustomOption(9) or 1];
 	fair_mountainCapCut = 0;	-- GLOBAL, for logs and tests
-	if cap == nil then return end
+	if maxN == nil then return end
 	local W, H = Map.GetGridSize();
-	local land, list, hills, flat = 0, {}, 0, 0;
+	local hills, flat, list = 0, 0, {};
 	local function Count(i)
 		local n = 0;
 		for _, j in ipairs(FairHexNeighbours(i, W, H)) do
@@ -1000,32 +1009,45 @@ function FairMountainCap()
 	end
 	for i = 0, W * H - 1 do
 		local p = Map.GetPlotByIndex(i);
-		if not p:IsWater() then land = land + 1 end
-		if p:IsMountain() then list[#list + 1] = i end
-		if p:IsHills() then hills = hills + 1 elseif not p:IsWater() and not p:IsMountain() then flat = flat + 1 end
+		if p:IsMountain() then list[#list + 1] = i
+		elseif p:IsHills() then hills = hills + 1
+		elseif not p:IsWater() then flat = flat + 1 end
 	end
-	-- a removed mountain becomes ordinary land: hills as often as the map's own land has hills
 	local hillPermille = math.floor(1000 * hills / math.max(1, hills + flat));
-	local extra = #list - math.floor(land * cap / 100 + 0.5);
-	print("BitMoreFairPangea: mountain cap", cap, "% mountains", #list, "land", land);
-	while extra > 0 and #list > 0 do
-		local best, bestN, bestR = nil, -1, 0;
-		for k, i in ipairs(list) do
-			local n = Count(i);
-			if n > bestN then best, bestN = k, n end
+	local function Edge(i)
+		for _, j in ipairs(FairHexNeighbours(i, W, H)) do
+			if not Map.GetPlotByIndex(j):IsMountain() then return true end
 		end
-		-- among the ties take a random one (the map's dice, same on every PC)
-		local ties = {};
-		for k, i in ipairs(list) do if Count(i) == bestN then ties[#ties + 1] = k end end
-		best = ties[1 + Map.Rand(#ties, "BitMoreFairPangea - mountain cap")];
-		local i = list[best];
-		local hill = Map.Rand(1000, "BitMoreFairPangea - mountain cap land") < hillPermille;
-		Map.GetPlotByIndex(i):SetPlotType(hill and PlotTypes.PLOT_HILLS or PlotTypes.PLOT_LAND, false, false);
-		table.remove(list, best);
-		extra = extra - 1;
+		return false;
+	end
+	while true do
+		-- 1.7 (user): peel a clump from its edge inward, never punch holes in its middle.
+		-- Candidates: mountains on the clump's rim that touch an over-full mountain
+		-- (or are over-full themselves); the one with the most mountain neighbours goes first.
+		local over, any = {}, false;
+		for _, i in ipairs(list) do if Count(i) > maxN then over[i] = true; any = true end end
+		if not any then break end
+		local bestN, ties = -1, {};
+		for k, i in ipairs(list) do
+			local touches = over[i];
+			if not touches then
+				for _, j in ipairs(FairHexNeighbours(i, W, H)) do if over[j] then touches = true; break end end
+			end
+			if touches and Edge(i) then
+				local n = Count(i);
+				if n > bestN then bestN, ties = n, {k} elseif n == bestN then ties[#ties + 1] = k end
+			end
+		end
+		if #ties == 0 then
+			for k, i in ipairs(list) do if over[i] then ties[#ties + 1] = k end end
+		end
+		local k = ties[1 + Map.Rand(#ties, "BitMoreFairPangea - mountain clumps")];
+		local hill = Map.Rand(1000, "BitMoreFairPangea - mountain clumps land") < hillPermille;
+		Map.GetPlotByIndex(list[k]):SetPlotType(hill and PlotTypes.PLOT_HILLS or PlotTypes.PLOT_LAND, false, false);
+		table.remove(list, k);
 		fair_mountainCapCut = fair_mountainCapCut + 1;
 	end
-	print("BitMoreFairPangea: mountains -> hills (cap)", fair_mountainCapCut);
+	print("BitMoreFairPangea: mountain clumps -> land", fair_mountainCapCut);
 end
 ------------------------------------------------------------------------------
 -- Work on the actual installed hex grid after the stock plot-index conversions.
@@ -1337,6 +1359,41 @@ function AddFeatures()
 	FairTerrainTweak();
 	if not FairNoLakes() then FairTundraLakes() end
 	FairReduceOpenPlains();
+	FairThinForests();
+end
+------------------------------------------------------------------------------
+FAIR_FOREST_CUT_PERCENT = {0, 5, 10};	-- option "Forest and jungle"
+function FairThinForests()
+	-- The thickest woods first (most wooded neighbours), so open spots appear
+	-- inside big forest blankets and single forests stay.
+	local pct = FAIR_FOREST_CUT_PERCENT[Map.GetCustomOption(10) or 1] or 0;
+	fair_forestCut = 0;
+	if pct == 0 then return end
+	local W, H = Map.GetGridSize();
+	local function Wood(p)
+		local f = p:GetFeatureType();
+		return f == FeatureTypes.FEATURE_FOREST or f == FeatureTypes.FEATURE_JUNGLE;
+	end
+	local list = {};
+	for i = 0, W * H - 1 do
+		local p = Map.GetPlotByIndex(i);
+		if Wood(p) then
+			local n = 0;
+			for _, j in ipairs(FairHexNeighbours(i, W, H)) do if Wood(Map.GetPlotByIndex(j)) then n = n + 1 end end
+			list[#list + 1] = {i = i, n = n, r = Map.Rand(1000, "BitMoreFairPangea - thin forests")};
+		end
+	end
+	table.sort(list, function(a, b)
+		if a.n ~= b.n then return a.n > b.n end
+		if a.r ~= b.r then return a.r < b.r end
+		return a.i < b.i;
+	end);
+	local cut = math.floor(#list * pct / 100 + 0.5);
+	for k = 1, cut do
+		Map.GetPlotByIndex(list[k].i):SetFeatureType(FeatureTypes.NO_FEATURE, -1);
+	end
+	fair_forestCut = cut;
+	print("BitMoreFairPangea: forest/jungle removed", cut, "of", #list);
 end
 ------------------------------------------------------------------------------
 FAIR_TUNDRA_LATITUDE = 0.55;	-- tundra starts at this latitude (the game: 0.6)
@@ -1600,6 +1657,108 @@ function StartPlotSystem()
 	print("Placing Resources and City States.");
 	start_plot_database:PlaceResourcesAndCityStates()
 	CSQ_Run(CSQ_Level(), nil);	-- city states: max 1 luxury + quality option
+	-- 1.7: the best starts capped (after everything else is placed).
+	fair_capLog = {};
+	for region_number = 1, start_plot_database.iNumCivs do
+		FairCapStart(start_plot_database, region_number);
+	end
+end
+------------------------------------------------------------------------------
+-- 1.7 (user): city states spread more evenly. The game always takes a coastal
+-- site when its search section has one, and searches each region from the rim
+-- inward. Here half the time an inland site is tried first, and a city state
+-- often skips the outer 1-2 sections, so more of them sit inland and nearer the middle.
+local FairGamePlaceCityState = AssignStartingPlots.PlaceCityState;
+function AssignStartingPlots:PlaceCityState(coastal, inland, check_proximity, check_collision)
+	if Map.Rand(100, "BitMoreFairPangea - CS inland first") < 50 then
+		local x, y, ok = FairGamePlaceCityState(self, {}, inland, check_proximity, check_collision);
+		if ok then return x, y, ok end
+		return FairGamePlaceCityState(self, coastal, {}, check_proximity, check_collision);
+	end
+	return FairGamePlaceCityState(self, coastal, inland, check_proximity, check_collision);
+end
+local FairGameNextSection = AssignStartingPlots.ObtainNextSectionInRegion;
+function AssignStartingPlots:ObtainNextSectionInRegion(...)
+	local a, b, c, d, e, f, middle = FairGameNextSection(self, ...);
+	if (fair_csSkip or 0) > 0 and not middle then
+		fair_csSkip = fair_csSkip - 1;
+		return {}, {}, c, d, e, f, middle;
+	end
+	return a, b, c, d, e, f, middle;
+end
+local FairGamePlaceCSInRegion = AssignStartingPlots.PlaceCityStateInRegion;
+function AssignStartingPlots:PlaceCityStateInRegion(cs, region)
+	local roll = Map.Rand(100, "BitMoreFairPangea - CS depth");
+	fair_csSkip = (roll < 35) and 0 or ((roll < 70) and 1 or 2);
+	local skipped = fair_csSkip > 0;
+	local discarded = self.iNumCityStatesDiscarded;
+	FairGamePlaceCSInRegion(self, cs, region);
+	if skipped and self.iNumCityStatesDiscarded > discarded then
+		-- nowhere deeper in: the game's own search from the rim
+		self.iNumCityStatesDiscarded = discarded;
+		fair_csSkip = 0;
+		FairGamePlaceCSInRegion(self, cs, region);
+	end
+	fair_csSkip = 0;
+end
+------------------------------------------------------------------------------
+-- 1.7 (user): cap the best starts, keep the variety. Within 3 tiles of a capital:
+-- food bonus at most 4 (a capital on fresh water counts that as 1.5 of them; no
+-- fresh water within 2 tiles allows 1 more); Wheat / Bananas / Deer (granary)
+-- at most 3 within 4 tiles; at most 2 of the region's luxury + 1 other luxury.
+-- Only removes, never adds; the furthest go first.
+FAIR_CAP_FOOD = 4;
+FAIR_CAP_FRESH_COST = 1.5;
+FAIR_CAP_GRANARY = 3;
+FAIR_CAP_REGIONAL_LUX = 2;
+FAIR_CAP_OTHER_LUX = 1;
+FAIR_GRANARY_RES = {"RESOURCE_WHEAT", "RESOURCE_BANANA", "RESOURCE_DEER"};
+function FairCapStart(asp, region)
+	local data = asp.startingPlots[region];
+	if data == nil then return end
+	FairLoadResourceKinds();
+	local x, y = data[1], data[2];
+	local capital = Map.GetPlot(x, y);
+	local granary = {};
+	for _, t in ipairs(FAIR_GRANARY_RES) do
+		local row = GameInfo.Resources[t];
+		if row ~= nil then granary[row.ID] = true end
+	end
+	local function Trim(list, keep)
+		-- list of {plot, d}; remove the furthest beyond `keep`
+		if #list <= keep then return 0 end
+		for _, e in ipairs(list) do e.r = Map.Rand(1000, "BitMoreFairPangea - cap start") end
+		table.sort(list, function(a, b) if a.d ~= b.d then return a.d < b.d end return a.r < b.r end);
+		for k = keep + 1, #list do list[k].plot:SetResourceType(-1) end
+		return #list - keep;
+	end
+	local function Collect(maxRing, test)
+		local list = {};
+		for ring = 1, maxRing do
+			for _, plot in ipairs(FairPlotsInRings(x, y, ring, ring)) do
+				local res = plot:GetResourceType(-1);
+				if res ~= -1 and test(res) then list[#list + 1] = {plot = plot, d = ring} end
+			end
+		end
+		return list;
+	end
+	local log = {region = region, x = x, y = y};
+	log.granary = Trim(Collect(4, function(res) return granary[res] end), FAIR_CAP_GRANARY);
+	local freshNear = capital:IsFreshWater();
+	if not freshNear then
+		for _, plot in ipairs(FairPlotsInRings(x, y, 1, 2)) do
+			if plot:IsRiver() or plot:IsLake() or plot:GetFeatureType() == FeatureTypes.FEATURE_OASIS then freshNear = true; break end
+		end
+	end
+	local budget = FAIR_CAP_FOOD + (freshNear and 0 or 1) - (capital:IsFreshWater() and FAIR_CAP_FRESH_COST or 0);
+	log.foodMax = math.floor(budget);
+	log.food = Trim(Collect(3, function(res) return fair_foodBonus[res] end), log.foodMax);
+	local regional = asp.region_luxury_assignment and asp.region_luxury_assignment[region];
+	log.regional = Trim(Collect(3, function(res) return fair_luxury[res] and res == regional end), FAIR_CAP_REGIONAL_LUX);
+	log.otherLux = Trim(Collect(3, function(res) return fair_luxury[res] and res ~= regional end), FAIR_CAP_OTHER_LUX);
+	table.insert(fair_capLog, log);
+	print("BitMoreFairPangea: cap start", region, "food max", log.foodMax, "removed food", log.food,
+		"granary", log.granary, "regional lux", log.regional, "other lux", log.otherLux);
 end
 ------------------------------------------------------------------------------
 function FairWrapX()
@@ -2337,7 +2496,15 @@ end
 -- Coastal capitals need production in the first ring. Prefer a hill on the
 -- shoreline, then any adjacent land hill if the shoreline cannot take one.
 local function FairCoastalHill(x, y)
-	if not Map.GetPlot(x, y):IsCoastalLand() then return false end
+	-- 1.7 (user): a coastal capital stands on a hill itself (city states crowd the coast).
+	local capital = Map.GetPlot(x, y);
+	if not capital:IsCoastalLand() then return false end
+	if capital:GetPlotType() == PlotTypes.PLOT_HILLS then return false end
+	if capital:GetPlotType() == PlotTypes.PLOT_LAND then
+		capital:SetPlotType(PlotTypes.PLOT_HILLS, false, true);
+		return true;
+	end
+	if true then return false end
 	local ring = FairPlotsInRings(x, y, 1, 1);
 	for _, shoreOnly in ipairs({true, false}) do
 		local candidates, bestRank = {}, 99;
