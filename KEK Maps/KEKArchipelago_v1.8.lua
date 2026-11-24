@@ -384,7 +384,7 @@ function GetMapScriptInfo()
 		table.insert(options, {Name = def.Name, Values = def.Values, DefaultValue = def.DefaultValue, SortPriority = n});
 	end
 	return {
-		Name = "KEK Archipelago 1.7",
+		Name = "KEK Archipelago 1.8",
 		Description = "Islands for free-for-all games. Every player starts on an own island of 20-40 tiles (option, up to 30-50), with islands of every size (1-30 tiles) all over the map and clusters of smaller islands; extra hills, Fish spread evenly, more coastal luxuries and atolls. Options for sizes, gaps, shapes, ocean and resources. Strategic balance: Horses, Iron (12), Coal (7) and Aluminium (3) within 3 tiles of every capital.",
 		IconIndex = 2,
 		SupportsSinglePlayer = true,
